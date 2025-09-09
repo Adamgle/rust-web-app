@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM stocks",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "abbreviation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "company",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "since",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 4,
+        "name": "price",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 5,
+        "name": "delta",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_update",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [false, false, false, false, false, false, false, false]
+  },
+  "hash": "f7d8b573ec3b3ac229d77643776080b575ce35cdc0dca189140bc478fc197153"
+}

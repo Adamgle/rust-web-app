@@ -1,0 +1,225 @@
+After finishing my Rust HTTP server I have came here to handle the real, production ready infrastructure and learn what I have done badly
+and what should I improve in the future.
+
+This file is a collection of notes, everything that I will find useful, insightful, something I did not know about would ideally be placed right here.
+
+### System related notes ###
+1 => | When writing a real application, one might want to consider a specialized
+     |
+     | For performance reasons, boxing is avoided in any hot path. For example, in
+     | `parse`, a custom error `enum` is defined. This is because the error is hit
+     | and handled during normal execution when a partial frame is received on a
+     | socket. `std::error::Error` is implemented for `parse::Error` which allows
+     | it to be converted to `Box<dyn std::error::Error>`.
+     | 
+     | error handling crate or defining an error type as an `enum` of causes.     
+     | A hot path is a sequence of instructions executed very frequently.
+     | That means we should avoid boxing frequently
+     |
+2 => | To implement buffered writes, we will use the BufWriter struct. 
+     | This struct is initialized with a T: AsyncWrite and implements AsyncWrite itself. 
+     | When write is called on BufWriter, the write does not go directly to the inner writer, but to a buffer.
+     | When the buffer is full, the contents are flushed to the inner writer and the inner buffer is cleared.
+     | There are also optimizations that allow bypassing the buffer in certain cases.
+     |
+3 => | Another alternative would be to not call flush() in write_frame().
+     | Instead, provide a flush() function on Connection.
+     | This would allow the caller to write queue multiple small frames in the write buffer then write them all to the socket with one write syscall.
+     | Doing this complicates the Connection API. Simplicity is one of Mini-Redis' goals, so we decided to include the flush().await call in fn write_frame().
+     |
+4 => | A Rust value is "pinned" when it can no longer be moved in memory. 
+     | A key property of a pinned value is that pointers can be taken to the pinned data and the caller can be confident the pointer stays valid. 
+     | This feature is used by async/await to support borrowing data across .await points.
+
+READ: 
+=> What is blocking, Tokio
+=> https://ryhl.io/blog/async-what-is-blocking/
+=> File descriptor => https://en.wikipedia.org/wiki/File_descriptor
+     => How do operating system can see if File_descriptor changed, await the change of File_descriptor.
+=> https://draft.ryhl.io/blog/shared-mutable-state/
+
+WATCH:
+=> DONE Async/await => https://www.youtube.com/watch?v=ThjvMReOXYM
+=> DONE Tokio => https://www.youtube.com/watch?v=o2ob8zkeq2s
+=> Pinning => https://www.youtube.com/watch?v=DkMwYxfSYNQ
+=> Dispatch and Fat Pointers => https://www.youtube.com/watch?v=xcygqF5LVmM
+=> Interior mutability smart pointers => Whatever the same guy
+=> Tracing => https://www.youtube.com/watch?v=21rtHinFA40
+=> Errors => https://www.youtube.com/watch?v=j-VQCYP7wyw
+
+LOOK INTO CRATES
+=> tokio console
+
+THING TO LOOK UP:
+=> Work Stealing
+=> Process
+=> Thread (computing)
+=> Channels
+=> Semaphore
+=> https://en.wikipedia.org/wiki/Synchronization_(computer_science)
+=> LLVM
+=> CodeGen/CodeGen pipelines
+=> Preemption (computing)
+=> Coroutine
+=> Green Thread
+=> Load balancing
+=> Websockets (Server Side Events related, not only)
+
+############### What will we build here ############### ############### What will we build here ###############
+############### What will we build here ############### ############### What will we build here ############### 
+############### What will we build here ############### ############### What will we build here ############### 
+
+
+Build web application using modern, production ready infrastructure. Of course we need something specific, not just the tooling
+the idea was to build something like an e-commerce, online shop thing, that of course sound the least impressive, but would allow to 
+work with databases, create many opportunities to expand the functionality to tried and true solutions so we can just focus 
+on implementing those solutions. That of course is not final.
+
+Also, prevent yourself from early documenting the code, so I have learned in my previous project.
+
+We will use Next.js for the frontend side of things, we won't utilize the API routes capabilities of the framework as the API and server 
+logic would be running in Rust. I have decide to use Next.js if I would want to generate Static Pages, but as I think about it 
+stock market simulator that I will build would not really benefit from static site generation, as the content frequently changes.
+So the next.js part of things is strictly client side, frontend code. Utilizing react server components is hard to do in Rust
+as they require integration that the next.js offers, definitely not worth it to implement in myself.
+Maybe something like proxy between the next.js and Rust axum API, to run some logic that runs on the server, but then 
+we would need 2 separate applications to communicate, basically 2 servers. The question is is it even worth it. 
+
+## Consider the scenario:
+ => The application we are building is a stock market simulator. We would ideally scrape the stock data from the web, or use 
+ => API if a free one is available. The data will have to frequently change, be frequently written to the database if we would want to 
+ => store a history of that data, because technically if we want to fetch the data and display it to the user, we only need some 
+ => local storage for like 1 minute, and then acquire a new one. In real time market I guess the updates are more frequent.
+ => It would be nice to keep the updates real-time, make sure that the market responds with updates every so often like 1 minute
+ => without user reloading the page. Then we would also react to something like a current changes in the wallet of a user,
+ => how much was gained or lost. The EventSource API could be used from client side and axum::response::sse from the server.
+
+
+## The app has to offer.
+-> Database support, surely relational Database like SQL, preferably PostgresSql
+-> Axum acting as a backend, not quite sure about the ecosystem around it.
+-> Asynchronous runtime done with Tokio
+-> For frontend either React or just native Typescript, but actually it would be easier to just write React if the app would grow big.
+     => Was thinking about something like Svelte, but I just don't care that much about frontend here, most work should be put into the backend.
+-> Utilize the tried and true ecosystem of Rust, eg.
+     -> serde, serde_json
+     -> anyhow => although not sure how it works. Definitely we would not Box any error and propagate up to the root.
+          I would expect to use something like enum with statically define variants. Of course that would depend of the type of an error,
+          is it application specific error, can we recover from the error, is it critical and so on.
+     -> chrono (if applicable)
+     -> tokio console => we could try tokio console for debugging the tokio runtime, detection long await points so that the runtime would frequently yield 
+          as expected. 
+     -> tracing => Logger would be probably tracing as it is kind of a default of Tokio. 
+     -> sqlx => I would prefer sqlx over diesel just to have the opportunity to write raw SQL queries.   
+     -> argon/bcrypt to hash passwords in the database
+-> Unit tests must be written, but only for the backend code. We will probably leave the frontend untested, at least not automatically tested via unit tests.
+-> Authentication, user roles, privileges, gate privileges in-and-out sassy breaking bad references.
+
+## It would be nice to have
+-> If application would grow Load balancing would be appreciated, thought this probably will never get hosted so not applicable. For now.
+
+## Possible issues that I may run into
+
+## IDEA 
+=> https://en.wikipedia.org/wiki/Stock_market_simulator
+=> https://en.wikipedia.org/wiki/Portfolio_(finance)
+
+THINGS TO LOOK UP APT, (Michael Scott school of business: Adapt. React. Readapt. Apt):
+-> tower
+-> tower_http
+-> tracing, tracing article tokio.rs
+
+DEFINING MINIMUM VIABLE PRODUCT:
+=> High-level overview of things to implement in order:
+     1. <DONE> Make a script to run both frontend dev server and backend dev server so to not have to do it manually
+     2. <DONE> Make sure the code structure is scalable, that includes things to do:
+          => <DONE> Define framework of working around errors in the application
+               -> Look into thiserror crate for error handling.
+               -> Look into Error trait in std to make sure what thiserror even abstracts.
+          => Make sure to adopt the best patterns around starting the projects, error handling, modularization of the code, splitting the logic to smaller pieces.
+     3. Define some basic API endpoints and integrate that with the frontend code, to test the communication, define how does the frontend will communicate.
+          -> with the backend and also refresh my memory of working with Next.js and React.
+     4. After the basic homepage functionality will stabilize, write unit tests to get grasp of unit testing.
+          -> What should be one the homepage.
+          1. 
+
+### ON GOING PROCESS:
+
+# Homepage design
+
+function Logo() {
+  // The Logo is currently undefined but we will maybe make it later, currently just a placeholder and a string.
+}
+
+function Profile() {
+  // Profile will consists of the user's image, maybe some dropdown menu to go to some actions of that profile
+  // Also we want to display the amount of the money user have, maybe even show some indication did he lost the money
+  // since he last logged in to the app and how much.
+  // The profile link will take the user to their profile page.
+  // -> That profile page is public, or at least could be public if we user opts in.
+  // -> It could show the portfolio of the user, although not sure if such think should be public, we will.
+}
+
+function Sidebar() {
+  // The Sidebar will consists of some action the user can take to go to other functionalities of the app.
+  // The Sidebar with current design will only make sens when the user is logged in. We can of course
+  // keep the sidebar as is, and just redirect the user to a login page if they are not logged in and clicked. We will do that.
+  // Mainly I was thinking:
+  // 1. Your stocks, display detail list of the stocks the user possesses.
+  // 2. Trade, since you can trade with other users on the platform.
+  // 3. Trading actions, That could be the automatic trading the user has defined. I don't know how that would work, yet.
+  // 4. Settings, where the user can configure their account and preferences.
+  // 5. <Possibly> Watchlist → , lets users track stocks they don’t own yet.
+  //  -> That is a private page, only accessible to the user, if they are logged in.
+  // Good to have, more complex to implement
+  // 1. Market → browse trending stocks, news, sectors, and performance.
+  // 2. Analytics / Insights → charts, performance breakdowns, risk analysis.
+  // That would probably require some math and algorithms on the stock analysis side.
+}
+
+function Stocks() {
+  // 1. Stocks data will be some stocks display in a grid basis,
+  // Each presenting a name of the stock and the price of the stock.
+  // Since we are storing history of stocks we will also show is it up or down since some time.
+  // 2. We can click on the stock get more details, display the stock chart, go to the details of that stock
+  // whatever that will be.
+}
+
+
+### DESIGNING THE DATABASE
+
+The basic overview of the database structure: 
+
+Tables: 
+- Stocks -> { id: int [Ref] [Unique], name: String, fullName: String, since: Date, price: usize, change: [Something like enums with 3 states might be useful, -/=/+ + numeric delta], last_update: Date, ...other }
+     => This table represents all stocks in the database, the will be referenced by user who bought the stock.
+     [last_update] might get implemented which represents when did we last updated the stocks data,
+- StocksHistory -> { id: int [Ref] [Unique], stock_id: int [Stocks Ref], prices: Array usize }
+     => I would represent stocks history as the separate table to ease the queries, as that data might be huge and we do not want to query
+     that every time we want some basic stock information.
+     => I am not sure if we would every single minute perform the write to the database, that might get inefficient. Not sure 
+          how to represent such thing to not bloat the CPU with those writes to the disk. I don't want to keep that in-memory, that would bloat 
+          the server memory, also not ideal. Maybe we could fetch that data. We may buffer that data and flush to the database every so often like 5 minutes.
+          [Redis] might be used here.
+- Users -> { id: int [Ref] [Unique], stocks: Array[stocks [Stocks Ref]],
+     created_at: Date, accountId: int [Accounts Ref], balance: usize }
+     => Users of the application, 
+     => [change] fields will represent the positive or negative change of the stock compared to the price from the last minute 
+- Accounts -> {id: int [Ref] [Unique], userTag: String [Unique], ...settings }
+     => Information related to the account of the users, users settings, and so on. Different than the user account which
+     links to the activity of the user related to the application, not to the system. We would place there something like password,
+     usernames, user tags (unique identifier of the user in the application, not related to the name of the user, which might to ne unique)
+     NOTE: Something like userTag might be considered redundant as there is already an id fields as a unique identifier, but that is more
+     human readable. Not sure if that should be placed there or in the Users Table.
+
+There would also be more more tables related to trading, watchlist, market would be something that lists every single stocks and allow you to buy the stocks,
+not sure if that would require additional table, maybe if there are stocks that are not on the market, but do exists.
+
+Also we need to remember to not store information in the database that we either way would have to run some computations on, of course speaking generally, 
+maybe in some cases that might be useful. Something like change in price of the stock should be computed and pushed to the database, actually not sure if 
+we want to write that to the database, but you get the picture. If you can run some computation and save that to the database, as if you would retrieve it 
+you would still have to crank those numbers than you may just do that while first writing the data.
+ 
+## IN MY EYES, WHAT I AM LACKING, SASSY AIN'T LIKE THAT REFERENCE
+=> Got to learn more about iterators and iterators methods, recommend a tour of the std.
+=> 

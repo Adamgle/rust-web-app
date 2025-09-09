@@ -1,0 +1,12 @@
+/target
+.env
+
+# sqlx metadata file
+# NOTE: As it happens that should be committed.
+# .sqlx
+.vscode
+
+/learning
+/node_modules
+/logs
+/realworld-axum-sqlx
