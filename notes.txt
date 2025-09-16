@@ -46,6 +46,7 @@ WATCH:
 => Interior mutability smart pointers => Whatever the same guy
 => Tracing => https://www.youtube.com/watch?v=21rtHinFA40
 => Errors => https://www.youtube.com/watch?v=j-VQCYP7wyw
+=> Builder pattern, whatever that is I wanna know => https://www.youtube.com/watch?v=pwmIQzLuYl0&list=PL7r-PXl6ZPcCIOFaL7nVHXZvBmHNhrh_Q&index=1
 
 LOOK INTO CRATES
 => tokio console

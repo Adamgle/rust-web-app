@@ -2,47 +2,31 @@ pub use prelude::*;
 
 pub mod config;
 pub mod controller;
-pub mod error;
+pub mod database;
+mod error;
 pub mod logger;
 pub mod prelude;
 
 use axum::Router;
-use sqlx::{Executor, query};
 
-use crate::config::{Config, Env};
+use crate::{config::Config, database::DatabaseConnection};
 
-pub async fn run() -> crate::Result<()> {
-    let app = Router::<()>::new()
-        // .route("/", get(|| async { "Hello, World!" }))
+#[derive(Clone)]
+pub struct AppState {
+    database: DatabaseConnection,
+    // caches: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>,
+}
+
+pub async fn run(config: config::Config) -> crate::Result<()> {
+    let database = database::DatabaseConnection::new().await?;
+
+    let app = Router::<AppState>::new()
         .merge(controller::stocks::router())
-        .layer(tower_http::trace::TraceLayer::new_for_http());
+        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .with_state(AppState { database });
 
     let listener = tokio::net::TcpListener::bind(Config::APP_SOCKET_ADDR).await?;
-
-    // NOTE: Error as such should not happen at all, because we check for missing envs at both ends.
-    let connection_string = dotenvy::var(Env::DatabaseUrl.as_ref())
-        .map_err(|e| config::Error::from(config::EnvError::MissingEnv(e)))?;
-
-    let database = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&connection_string)
-        .await?;
-
-    let result = database
-        .execute("SELECT stocks.abbreviation FROM stocks")
-        .await?;
-
-    println!("Database connection: {:?}", database);
-
-    let map = query!("SELECT * FROM stocks");
-    let map2 = query!("SELECT created_at FROM users");
-
-    let rows = map.fetch_all(&database).await?;
-    let rows2 = map2.fetch_all(&database).await?;
-
-    println!("Query result: {:#?}", result);
-    println!("Query map: {:#?}", rows);
-    println!("Query map2: {:#?}", rows2);
+    tracing::debug!("Listening on {}", Config::APP_SOCKET_ADDR);
 
     axum::serve(listener, app).await?;
 

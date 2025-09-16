@@ -36,8 +36,8 @@ def start():
     frontend_envs = dotenv_values(FRONTEND_ENV_PATH, verbose=True)
 
     # Detect merge conflicts
-    # Order insensitive comparison, dicts are different, conflicts detected.
     try:
+        # Order insensitive comparison, dicts are different, conflicts detected.
         if dict(envs) != dict(frontend_envs):
             # Check if the envs in the client are the same as the one in the server
 
@@ -53,8 +53,6 @@ def start():
                     f"Differences found between server: {DOTENV_PATH} and client: {FRONTEND_ENV_PATH} files, review the conflicts: "
                     + ",".join(f"{k}: {v[0]} != {v[1]}" for k, v in diffs.items())
                 )
-
-            # Flush the exact file content of the server .env to client .env
     except Exception as e:
         print(f"[WARN]: {e}")
         choice = input("Proceed with merge y/N: ").lower().strip()
@@ -67,6 +65,12 @@ def start():
 
     # The .env of the server is the source of truth, copy it to the client.
     shutil.copyfile(DOTENV_PATH, FRONTEND_ENV_PATH)
+
+    with open(FRONTEND_ENV_PATH, "r+", encoding="utf-8") as f:
+        original_content = f.read()
+        f.seek(0)
+        f.write(f"# [INFO]: Copied {DOTENV_PATH} to {FRONTEND_ENV_PATH}\r\n")
+        f.write(original_content)
 
     # Run server
     # # bacon --job run

@@ -1,17 +1,33 @@
-use crate::config;
+// The convention would be to keep the Error enum per module, and if that Error enum
+// needs to abstract some errors in a separate container, like another enum,
+// it will end with the `Error` suffix, so we can import it in other modules
+// without referring to the module, like config::EnvError. This way
+// you can bring something to scope without referring to the module and know that something is and error.
+// The main Error enum will be always referred to with the module, like config::Error.
+
+use axum::response::IntoResponse;
 
 #[derive(thiserror::Error, Debug)]
 #[error("Config error occurred: {0}")]
 pub enum Error {
     // The idea is variants per module that wrap it's inner errors.
-    Config(#[from] config::Error),
+    Config(#[from] crate::config::Error),
     // There is not module called database. Think about making one.
-    Database(#[from] sqlx::Error),
+    Database(#[from] crate::database::Error),
     #[error("I/O error occurred: {0}")]
     Io(#[from] std::io::Error),
     // That is kind of a catch-all variant
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> axum::response::Response {
+        let message = format!("Shoot, ...: {}", self);
+        let response = (axum::http::StatusCode::INTERNAL_SERVER_ERROR, message);
+
+        axum::response::IntoResponse::into_response(response)
+    }
 }
 
 // NOTE: Snippet to hide the public API

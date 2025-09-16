@@ -1,21 +1,22 @@
-pub mod error;
-
+mod error;
 pub use self::error::{EnvError, Error};
 
-use std::{collections::HashSet, fmt::Debug, hash::Hash, path::Prefix, str::FromStr};
+use std::{collections::HashSet, fmt::Debug, hash::Hash, str::FromStr};
 use strum::IntoEnumIterator;
-pub struct Config;
 
 pub(in crate::config) type Result<T> = std::result::Result<T, self::Error>;
 
+pub struct Config;
+
+/// ## This code should not happen. Written to practice unit testing.
+///
 /// Defines all the environment variables used in the application.
-/// There should be no envs that are not defined under `.env` and there should be no envs defined in the `.env` that are not declared here.
+/// Throw runtime errors if there is any mismatch between the envs defined in the `.env` file
 ///
-/// Variants does not have to follow the SCREAMING_SNAKE_CASE convention,
-/// since we are using the strum attribute serialize_all = "SCREAMING_SNAKE_CASE"
+/// Denies non_camel_case_types to enforce the convention of enum variants.
 ///
-/// Keep in mind that the envs inside the `.env` does have to follow the SCREAMING_SNAKE_CASE convention and will not
-/// be automatically converted to that format.
+/// Although that is strictly not necessary, since the serialize_all attribute serializes the variants to SCREAMING_SNAKE_CASE,
+/// but that could produce unsound code if the variants are not following the convention.
 ///
 /// Envs are validated to be in SCREAMING_SNAKE_CASE when loading from the `.env` file.
 /// They are getting checked for duplicates after the translation to SCREAMING_SNAKE_CASE from serialize_all,
@@ -34,6 +35,7 @@ pub(in crate::config) type Result<T> = std::result::Result<T, self::Error>;
     strum_macros::EnumString,
 )]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+#[deny(non_camel_case_types)]
 pub enum Env {
     ServerUrl,
     ServerPort,
@@ -42,7 +44,6 @@ pub enum Env {
     DbAdminPostgresPassword,
     DbPostgresAdambPassword,
     DatabaseUrl,
-    // SQLXOffline,
 }
 
 impl Env {
@@ -66,7 +67,7 @@ impl Env {
     // The isolation between two function compare_envs and check_mapping is to make the
     // unit testing easier. Normally I would just call the check_mapping directly
     fn compare_envs(other: HashSet<String>) -> self::Result<()> {
-        return Self::check_mapping(Self::get_enum_envs()?, other);
+        Self::check_mapping(Self::get_enum_envs()?, other)
     }
 
     /// Checks if there is 1-1 mapping between the envs declared in the .env file and the envs declared in the Env enum.
@@ -77,7 +78,6 @@ impl Env {
             let missing_from_file = enum_envs
                 .difference(&file_envs)
                 .cloned()
-                .map(Into::into)
                 .collect::<HashSet<String>>();
 
             // The case of the missing from enum is not possible as the error would occur when converting with from_str
@@ -90,7 +90,9 @@ impl Env {
     }
 
     /// Retrieves all the envs defined in the .env file and checks for duplicates and format.
-    fn get_file_envs() -> self::Result<HashSet<String>> {
+    ///
+    /// Make it visible for the integration tests.
+    pub fn get_file_envs() -> self::Result<HashSet<String>> {
         let cwd = std::env::current_dir().map_err(EnvError::from)?;
         let env_path = cwd.join(Self::ENV_PATH);
 
@@ -108,7 +110,6 @@ impl Env {
             // Since the key is in wrong format, surely there is not variant for it in the enum.
             // and we want to inform about that before we inform about the missing variant in the enum.
             if !key.chars().all(|r| r.is_uppercase() || r == '_') {
-                println!("EnvError::WrongFormat");
                 return Err(EnvError::WrongFormat(key).into());
             }
 
@@ -128,15 +129,14 @@ impl Env {
     /// Retrieves all the envs defined in the Env enum.
     ///
     /// Checks for duplicates after the translation to SCREAMING_SNAKE_CASE from serialize_all.
-    fn get_enum_envs() -> self::Result<HashSet<String>> {
-        Env::iter()
+    pub fn get_enum_envs() -> self::Result<HashSet<String>> {
+        Self::iter()
             .try_fold(HashSet::new(), |mut acc, env| {
                 if !acc.insert(env.to_string()) {
                     Err(EnvError::DuplicatedEnvInEnum {
                         translation: env.to_string(),
                         variant: env,
                     })
-                    .into()
                 } else {
                     Ok(acc)
                 }
@@ -160,16 +160,15 @@ impl Config {
 // TODO: Write tests for the Env enum and the .env file 1-1 mapping.
 #[cfg(test)]
 mod tests {
-    use crate::config::{Env, EnvError};
+    use crate::config::Env;
     use std::{
         io::{Read, Seek, Write},
-        path::Prefix,
         str::FromStr,
     };
 
     use anyhow::Context;
+    use rand::Rng;
     use std::collections::HashSet;
-    use tower_http::compression::Predicate;
 
     // Some API to restore the current-working-directory after the tests that are changingS it.
     #[derive(Debug)]
@@ -214,8 +213,6 @@ mod tests {
     ///
     /// NOTE: Every test that calls this function has to be marked with `#[serial_test::serial]`
     /// since it changes the current-working-directory that is a global state and tests cannot be run in parallel.
-    /// 
-    /// 
     fn create_temp_env_file(vars: &[&str]) -> anyhow::Result<HashSet<String>> {
         let tempdir = tempfile::tempdir()?;
         let path = tempdir.path().join(Env::ENV_PATH);
@@ -223,13 +220,14 @@ mod tests {
         let mut file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
+            .truncate(true)
             .create(true)
             .open(&path)
             .context("Failed to open temp env file")?;
 
         // Store previous cwd and restore it after the test.
         // If not hold into the variable, the Drop will be called immediately and the cwd will be restored before
-        let _guard = TempCwd::push(&tempdir.path())?;
+        let _guard = TempCwd::push(tempdir.path())?;
 
         // Write every single var to the env file, we do not care about the values.
         for var in vars.iter() {
@@ -303,6 +301,12 @@ mod tests {
         // Write one less to enum, to simulate the missing env in the enum.
         let enum_envs =
             HashSet::<String>::from_iter(vars[..vars.len() - 1].iter().map(|s| s.to_string()));
+
+        // Testing for EnvError::MissingEnvFromFile is impossible as we would have to interfere with the enum variants at runtime
+        // or we could just test on the already serialized data, but that would be testing the HashSet comparison
+        // which feels useless.
+
+        // return Err(EnvError::MissingEnvFromFile(missing_from_file).into());
 
         assert_ne!(file_envs, enum_envs);
 
@@ -384,7 +388,58 @@ mod tests {
         );
     }
 
-    // NOTE: I do not know how to test the duplicated in enum after serialize_all to SCREAMING_SNAKE_CASE
-    // as that would require to modify the enum variant at runtime, but we could consider that it is
-    // already tested by the strum_macros crate.
+    #[test]
+    #[serial_test::serial]
+    fn test_check_missing_env_from_enum() {
+        // Generate a key that's almost surely not in the enum
+        let random_key: String = rand::rng()
+            .sample_iter(&rand::distr::Alphabetic)
+            .take(16)
+            .map(char::from)
+            .collect();
+
+        // Force uppercase to match the SCREAMING_SNAKE_CASE requirement
+        let random_key = random_key.to_uppercase();
+        assert!(random_key.chars().all(|c| c.is_uppercase() || c == '_'));
+
+        let vars = vec!["SERVER_URL", "DATABASE_URL", &random_key];
+
+        // That fails because it tries to convert the random_key to enum variant
+        // with the from_str
+        let file_envs = self::create_temp_env_file(&vars).unwrap_err();
+        let err = file_envs
+            .downcast_ref::<super::Error>()
+            .expect("Expected config::Error");
+
+        assert!(matches!(
+            err,
+            crate::config::Error::Env(crate::config::EnvError::MissingEnvFromEnum(_))
+        ));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_check_missing_env_from_file() {
+        let enum_envs = Env::get_enum_envs().unwrap();
+
+        if !enum_envs.is_empty() {
+            let mut file_envs = enum_envs.clone().into_iter();
+
+            let first = file_envs.next().unwrap().clone();
+            let file_envs = file_envs.collect::<HashSet<String>>();
+
+            let result = Env::check_mapping(enum_envs, file_envs);
+            let result = result.unwrap_err();
+
+            assert!(
+                matches!(
+                    result,
+                    crate::config::Error::Env(crate::config::EnvError::MissingEnvFromFile(ref missing))
+                    if missing == &HashSet::from_iter(vec![first])
+                ),
+                "Expected MissingEnvFromFile error with correct missing env, but got {:?}",
+                result
+            );
+        }
+    }
 }
