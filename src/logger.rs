@@ -1,5 +1,3 @@
-use tracing_subscriber::{self};
-
 pub fn init() -> crate::Result<()> {
     // let log = std::fs::File::create("logs/logs.log")?;
     // let stdout_log = tracing_subscriber::fmt::layer().pretty();
@@ -15,12 +13,16 @@ pub fn init() -> crate::Result<()> {
     //     // .with_thread_names(true)
     //     .init();
 
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        // .with_writer(stdout)
-        // .with_thread_ids(true)
-        // .with_thread_names(true)
-        .init();
+    console_subscriber::init();
+    tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "tokio=trace,runtime=trace".into());
+
+    // tracing_subscriber::fmt()
+    //     .with_max_level(tracing::Level::DEBUG)
+    //     // .with_writer(stdout)
+    //     // .with_thread_ids(true)
+    //     // .with_thread_names(true)
+    //     .init();
 
     Ok(())
 }

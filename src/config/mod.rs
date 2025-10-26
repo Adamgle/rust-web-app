@@ -47,18 +47,12 @@ pub enum Env {
 }
 
 impl Env {
-    // TODO: Isolate to the config file, or ideally remove that shenanigans as backend should
-    // not care about the frontend envs and they should be separate.
+    // The same .env is shared across frontend which is a shenanigan.
     pub const ENV_PATH: &str = ".env";
 
     /// Loads the envs from the `.env` file and checks for 1-1 mapping between the envs defined in the .env file and the enum variants.
     /// Tries to be detailed about the error messages converting the mismatches between the two.
     fn load_envs() -> self::Result<()> {
-        // Converting to string allows the serialize_all attribute to kick in.
-        // This way we can be sure that the envs are in SCREAMING_SNAKE_CASE and can be valid even when
-        // not following the convention in the enum declaration.
-        // FromStr does not take the serialize_all attribute into account, since the conversion to strings.
-
         Self::compare_envs(Self::get_file_envs()?)?;
 
         Ok(())
@@ -147,7 +141,7 @@ impl Env {
 
 impl Config {
     // NOTE: Those probably should be as a field on the struct, definitely it should be possible to configure
-    // those thorough a config file.
+    // those through a config file.
     pub const APP_SOCKET_ADDR: &str = "127.0.0.1:5000";
 
     pub fn new() -> self::Result<Self> {
@@ -198,12 +192,6 @@ mod tests {
     // On assertion failure the Drop impl will restore the current-working-directory
     impl Drop for TempCwd {
         fn drop(&mut self) {
-            assert_eq!(
-                self.old,
-                std::path::PathBuf::from("C:\\Dev\\Rust\\rust-web-app")
-            );
-
-            println!("Restoring cwd to: {:?}", self.old);
             std::env::set_current_dir(&self.old).unwrap();
         }
     }

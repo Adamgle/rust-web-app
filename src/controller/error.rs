@@ -7,8 +7,8 @@ use crate::controller::stocks;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Stocks controller error: {0}")]
-    ControllerStocks(#[from] stocks::Error),
+    Stocks(#[from] stocks::Error),
     // #[error("Some other controller error: {0}")]
     #[error("Some other controller error")]
-    ControllerSomethingElse, // Placeholder for future errors
+    SomethingElse, // Placeholder for future errors
 }

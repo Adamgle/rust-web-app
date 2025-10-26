@@ -14,6 +14,7 @@ pub enum Error {
     Config(#[from] crate::config::Error),
     // There is not module called database. Think about making one.
     Database(#[from] crate::database::Error),
+    Controller(#[from] crate::controller::Error),
     #[error("I/O error occurred: {0}")]
     Io(#[from] std::io::Error),
     // That is kind of a catch-all variant

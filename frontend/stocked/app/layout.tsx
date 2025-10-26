@@ -1,3 +1,6 @@
+// NOTE: We cannot use 'use client' as we use metadata here.
+// "use client";
+
 import type { Metadata } from "next";
 import "./globals.css";
 

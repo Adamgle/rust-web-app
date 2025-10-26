@@ -18,10 +18,18 @@ pub struct AppState {
 }
 
 pub async fn run(config: config::Config) -> crate::Result<()> {
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+    });
+
     let database = database::DatabaseConnection::new().await?;
 
-    let app = Router::<AppState>::new()
+    let api_router = Router::new()
         .merge(controller::stocks::router())
+        .merge(controller::auth::router());
+
+    let app = Router::<AppState>::new()
+        .nest("/api/v1", api_router)
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(AppState { database });
 

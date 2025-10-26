@@ -16,17 +16,6 @@ FRONTEND_ENV_PATH = pathlib.Path("./frontend/stocked/.env")
 FRONTEND_PATH = pathlib.Path("./frontend/stocked")
 
 
-# def get_url_port(url: str | None) -> str:
-# if url is None:
-#     raise Exception("URL is None")
-
-# port = urlparse(url).port
-# if port is None:
-#     raise Exception(f"Port not found in url: {url}")
-
-# return str(port)
-
-
 def start():
     # Check if frontend path exists and .env
     if not FRONTEND_PATH.exists():

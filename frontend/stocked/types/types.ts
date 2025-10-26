@@ -1,4 +1,4 @@
-// NOTE: Currently that would the whole file, when the type would get extensive we would split those.
+// NOTE: Currently that would the single file, when the types would get extensive we would split those.
 
 export interface Stock {
     id: number;

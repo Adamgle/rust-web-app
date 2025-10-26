@@ -153,16 +153,21 @@ VALUES
     ('AAPL', 'Apple Inc.', '1980-12-12', 150.0, 0.5) RETURNING id AS stock_id;
 
 
-INSERT INTO
-    stocks (abbreviation, company, since, price, delta)
-VALUES
-    (
-        'GOOGL',
-        'Alphabet Inc.',
-        '2004-08-19',
-        2800.0,
-        -0.3
-    ) RETURNING id AS stock_id;
+DO $$  
+    BEGIN FOR i IN 1..40 LOOP
+    INSERT INTO
+        stocks (abbreviation, company, since, price, delta)
+    VALUES
+        (
+            'GOOGL' || i,
+            'Alphabet Inc.',
+            '2004-08-19',
+            2800.0,
+            -0.3
+        );
+    END LOOP;
+END $$;
+
 
 
 SELECT

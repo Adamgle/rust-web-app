@@ -1,5 +1,6 @@
 mod error;
 pub use error::Error;
+use sqlx::types::chrono;
 use tracing::info;
 
 use crate::{AppState, database::DatabaseConnection};
@@ -12,63 +13,37 @@ pub(in crate::controller::stocks) type Result<T> = std::result::Result<T, self::
 
 pub fn router() -> axum::Router<AppState> {
     axum::Router::new()
-        .route("/api/v1/stocks", axum::routing::get(get_stocks))
-        .route("/api/v1/stocks/{id}", axum::routing::get(get_stock))
+        .route("/stocks", axum::routing::get(get_stocks))
+        .route("/stocks/{id}", axum::routing::get(get_stock))
 }
 
-// //`Path` gives you the path parameters and deserializes them.
-// async fn path(Path(user_id): Path<u32>) {}
-
-// // `Query` gives you the query parameters and deserializes them.
-// async fn query(Query(params): Query<HashMap<String, String>>) {}
-
-// // Buffer the request body and deserialize it as JSON into a
-// // `serde_json::Value`. `Json` supports any type that implements
-// // `serde::Deserialize`.
-// async fn json(Json(payload): Json<serde_json::Value>) {}
+// https://docs.rs/sqlx/latest/sqlx/postgres/types/index.html#types
+#[derive(serde::Serialize)]
+struct Stock {
+    id: i32, // That should be unsigned, but it fails converting to u32, as postgres does not have unsigned, like a [1, 2^31 - 1]
+    abbreviation: String,
+    company: String,
+    since: chrono::NaiveDate, // DATE
+    price: f32,
+    delta: f32,
+    last_update: chrono::NaiveDate, // TIMESTAMP
+    created_at: chrono::NaiveDate,  // TIMESTAMP
+}
 
 // Not a handler.
 // <T: DeserializeOwned + Send + Sync>(
-async fn list_stocks(
-    DatabaseConnection(conn): DatabaseConnection,
-    // State(DatabaseConnection): State<DatabaseConnection>,
-) -> self::Result<Vec<serde_json::Value>> {
+async fn list_stocks(DatabaseConnection(conn): DatabaseConnection) -> self::Result<Vec<Stock>> {
     // TODO: Consider reading queries from file
     // let account = sqlx::query_file!("tests/test-query-account-by-id.sql", 1i32)
     //     .fetch_one(&mut conn)
     //     .await?;
 
-    let stocks = sqlx::query!("SELECT * FROM stocks")
+    // That maps the query result to the struct Stock.
+    Ok(sqlx::query_as!(Stock, "SELECT * FROM stocks")
         .fetch_all(&conn)
         .await
-        .map_err(crate::database::Error::from)
-        .map_err(self::Error::from)?;
-
-    for row in stocks.iter() {
-        println!("Stock row: {:?}", row);
-    }
-
-    // let result = database
-    //     .execute("SELECT stocks.abbreviation FROM stocks")
-    //     .await?;
-
-    // println!("Database connection: {:?}", database);
-
-    // let map = query!("SELECT * FROM stocks");
-    // let map2 = query!("SELECT created_at FROM users");
-
-    // let rows = map.fetch_all(&database).await?;
-    // let rows2 = map2.fetch_all(&database).await?;
-
-    // println!("Query result: {:#?}", result);
-    // println!("Query map: {:#?}", rows);
-    // println!("Query map2: {:#?}", rows2);
-
-    Ok(vec![
-        serde_json::json!({ "id": 1, "name": "Product 1", "price": 10.0 }),
-        serde_json::json!({ "id": 2, "name": "Product 2", "price": 20.0 }),
-        serde_json::json!({ "id": 3, "name": "Product 3", "price": 30.0 }),
-    ])
+        // Propagation casts to self::Error using #[from] crate::database::Error on self:Error
+        .map_err(crate::database::Error::from)?)
 }
 
 #[axum::debug_handler]
@@ -79,21 +54,30 @@ pub async fn get_stocks(
 ) -> self::Result<impl IntoResponse> {
     let stocks = self::list_stocks(conn).await?;
 
-    Ok(axum::Json(stocks))
+    Ok(Json(stocks))
 }
 
 pub async fn get_stock(
-    Path(id): Path<u32>,
+    // id: Result<FalliblePath>,
+    Path(id): Path<String>,
     State(conn): State<DatabaseConnection>,
 ) -> self::Result<impl IntoResponse> {
-    let stocks = self::list_stocks(conn).await?;
+    let id = id
+        .parse::<i32>()
+        .map_err(|_| self::Error::IdNotInPostgresSerialRange { id })
+        .and_then(|id| match id < 1 {
+            true => Err(self::Error::IdNotInPostgresSerialRange { id: id.to_string() }),
+            false => Ok(id),
+        })?;
 
+    let stocks = self::list_stocks(conn).await?;
     info!("Looking for stock with id: {}", id);
 
     Ok(Json(
         stocks
             .into_iter()
-            .find(|stock| stock.get("id") == Some(&serde_json::json!(id)))
+            // That would fail if id > i32::MAX
+            .find(|stock| stock.id == id)
             .unwrap(),
     ))
 }
