@@ -24,9 +24,14 @@ pub enum Error {
 
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
-        let message = format!("Shoot, ...: {}", self);
-        let response = (axum::http::StatusCode::INTERNAL_SERVER_ERROR, message);
 
+        let message = format!("Shoot, ...: {}", self);
+        let response = (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            message.clone(),
+        );
+
+        tracing::error!(message);
         axum::response::IntoResponse::into_response(response)
     }
 }

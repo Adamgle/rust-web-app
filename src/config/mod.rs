@@ -44,6 +44,7 @@ pub enum Env {
     DbAdminPostgresPassword,
     DbPostgresAdambPassword,
     DatabaseUrl,
+    RustLog,
 }
 
 impl Env {
@@ -199,6 +200,8 @@ mod tests {
     /// Creates a temporary `.env` file in a temporary directory with the provided envs.
     /// Fills the envs with dummy values. Return the set of envs that were written to the file.
     ///
+    /// Value of the envs are set to "value"
+    ///
     /// NOTE: Every test that calls this function has to be marked with `#[serial_test::serial]`
     /// since it changes the current-working-directory that is a global state and tests cannot be run in parallel.
     fn create_temp_env_file(vars: &[&str]) -> anyhow::Result<HashSet<String>> {
@@ -256,6 +259,24 @@ mod tests {
                 Env::from_str(&to_string).context("Failed to convert back to variant")?;
 
             assert_eq!(env, to_variant)
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial_test::serial]
+    /// We need serial_test::serial for that to now interfere with other tests, or more like, for other tests to not interfere
+    /// but actually that test can also interfere.
+    fn test_envs_loaded_from_file() -> anyhow::Result<()> {
+        let vars = vec!["SERVER_URL", "DATABASE_URL", "CLIENT_URL"];
+
+        let file_envs = self::create_temp_env_file(vars.as_slice())?;
+
+        assert_eq!(vars.len(), file_envs.len());    
+        
+        for var in file_envs.iter() {
+            assert_eq!(std::env::var(var).unwrap_or_default(), "value");
         }
 
         Ok(())

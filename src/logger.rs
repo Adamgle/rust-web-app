@@ -1,3 +1,5 @@
+//! I know nothing about tracing, what happened here is an abomination born of trial and error.
+
 pub fn init() -> crate::Result<()> {
     // let log = std::fs::File::create("logs/logs.log")?;
     // let stdout_log = tracing_subscriber::fmt::layer().pretty();
@@ -13,16 +15,62 @@ pub fn init() -> crate::Result<()> {
     //     // .with_thread_names(true)
     //     .init();
 
-    console_subscriber::init();
-    tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "tokio=trace,runtime=trace".into());
-
-    // tracing_subscriber::fmt()
-    //     .with_max_level(tracing::Level::DEBUG)
-    //     // .with_writer(stdout)
-    //     // .with_thread_ids(true)
-    //     // .with_thread_names(true)
+    // console_subscriber::ConsoleLayer::builder()
+    //     .filter_env_var("tokio=trace,runtime=trace")
+    //     .with_default_env()
     //     .init();
+
+    // use tracing_subscriber::prelude::*;
+
+    // ConsoleLayer::builder()
+    //     .with_default_env()
+    //     .filter_env_var("RUST_LOG=DEBUG")
+    //     .init();
+
+    // let console_layer = console_subscriber::ConsoleLayer::builder().spawn();
+
+    // let fmt_layer = tracing_subscriber::fmt::layer()
+    //     .with_thread_ids(true)
+    //     .with_thread_names(true)
+    //     .with_target(true); // optional: shows module path
+
+    // This is required do not know why, the env variable RUST_LOG is not enough.
+    // let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "debug".into()); // fallback level
+
+    // unsafe {
+    //     std::env::set_var("RUST_LOG", "info");
+    // }
+
+    // let console_layer = ConsoleLayer::builder()
+    //     .with_default_env() // sets the default env filter for tokio console
+    //     .spawn();
+
+    // tracing_subscriber::registry()
+    //     .with(env_filter)
+    //     .with(console_layer)
+    //     .with(fmt_layer)
+    //     .init();
+
+    // tracing_subscriber::registry()
+    //     .with(console_layer)
+    //     .with(tracing_subscriber::fmt::layer())
+    //     .init();
+
+    // use tracing_subscriber::prelude::*;
+
+    // let console_layer = console_subscriber::ConsoleLayer::builder()
+    //     .with_default_env()
+    //     .spawn();
+
+    // tracing_subscriber::registry()
+    //     // .with(env_filter)
+    //     .with(console_layer)
+    //     // .with(env_filter)
+    //     //  .with(..potential additional layer..)
+    //     .init();
+
+    console_subscriber::init();
+    tracing::info!("Logger initialized");
 
     Ok(())
 }

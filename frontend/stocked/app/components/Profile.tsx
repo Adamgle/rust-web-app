@@ -1,16 +1,36 @@
 "use client";
 
+import Link from "next/link";
+import { getSessionUser } from "../../api/hooks/getAuthSessions";
 
+function LoginButton() {
+  return (
+    <Link
+      href="/login"
+      className="bg-gray-700 text-white font-bold p-2 rounded h-fit text-xs self-center"
+    >
+      Login
+    </Link>
+  );
+}
 
 export function Profile() {
+  const sessionUser = getSessionUser();
+
+  if (!sessionUser) {
+    return <LoginButton />;
+  }
+
+  const { name, image, balance } = sessionUser;
+
   return (
     <div className="flex flex-col gap-2 h-fit text-sm">
       <div className="flex flex-row gap-4">
-        <div className="border rounded-sm p-2">Name</div>
-        <div className="border rounded-sm p-2">Image</div>
+        <div className="border rounded-sm p-2">{name}</div>
+        <div className="border rounded-sm p-2">{image}</div>
       </div>
       <button className="bg-blue-500 text-white font-bold p-1 rounded text-sm">
-        Balance $0.0
+        Balance {balance}
       </button>
     </div>
   );

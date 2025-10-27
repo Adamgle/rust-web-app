@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import useSWR, { SWRResponse } from "swr";
 
 /**
@@ -19,12 +20,22 @@ export function useFetch<Data>(
   let endpoint = path.startsWith("/") ? path : `/${path}`;
 
   if (!path.startsWith(API_VERSION)) {
-    endpoint = API_VERSION + path;
+    endpoint = API_VERSION + endpoint;
   }
 
-  async function fetcher(url: string): Promise<Data> {
-    return fetch(url, options).then((res) => res.json());
-  }
+  const callback = useCallback(
+    () => fetcher<Data>(endpoint, options),
+    [endpoint, options]
+  );
 
-  return useSWR<Data>(endpoint, fetcher);
+  return useSWR<Data>(endpoint, callback);
+}
+
+// I believe it is better to move the fetcher outside of the hook to prevent
+// to prevent the re-allocation on each render and call to useFetch.
+async function fetcher<Data>(
+  url: string,
+  options?: RequestInit
+): Promise<Data> {
+  return fetch(url, options).then((res) => res.json());
 }

@@ -1,3 +1,4 @@
+import { getSessionUser } from "../../api/hooks/getAuthSessions";
 import { Logo, Profile } from "./Profile";
 
 const HeaderProfile = () => {

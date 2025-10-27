@@ -42,7 +42,7 @@ async fn list_stocks(DatabaseConnection(conn): DatabaseConnection) -> self::Resu
     Ok(sqlx::query_as!(Stock, "SELECT * FROM stocks")
         .fetch_all(&conn)
         .await
-        // Propagation casts to self::Error using #[from] crate::database::Error on self:Error
+        // Propagation casts to self::Error using #[from] crate::database::Error on self::Error
         .map_err(crate::database::Error::from)?)
 }
 
@@ -69,6 +69,9 @@ pub async fn get_stock(
             true => Err(self::Error::IdNotInPostgresSerialRange { id: id.to_string() }),
             false => Ok(id),
         })?;
+
+    // TODO: I do not remember what happened here, but that is clearly some temporary shenanigans of the mind.
+    // We should just SELECT from the database here.
 
     let stocks = self::list_stocks(conn).await?;
     info!("Looking for stock with id: {}", id);

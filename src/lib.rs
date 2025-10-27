@@ -17,11 +17,7 @@ pub struct AppState {
     // caches: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>,
 }
 
-pub async fn run(config: config::Config) -> crate::Result<()> {
-    tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-    });
-
+pub async fn run(_config: config::Config) -> crate::Result<()> {
     let database = database::DatabaseConnection::new().await?;
 
     let api_router = Router::new()
@@ -31,6 +27,7 @@ pub async fn run(config: config::Config) -> crate::Result<()> {
     let app = Router::<AppState>::new()
         .nest("/api/v1", api_router)
         .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(tower_cookies::CookieManagerLayer::new())
         .with_state(AppState { database });
 
     let listener = tokio::net::TcpListener::bind(Config::APP_SOCKET_ADDR).await?;

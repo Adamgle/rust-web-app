@@ -14,7 +14,7 @@ fn test_enum_file_equality() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn whatever() {
-    assert_eq!(2 + 2, 4);
-}
+// #[test]
+// fn whatever() {
+//     assert_eq!(2 + 2, 4);
+// }

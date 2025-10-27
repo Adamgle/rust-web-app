@@ -4,7 +4,8 @@ pub mod stocks;
 
 pub use error::Error;
 
-pub(in crate::controller) type Result<T> = std::result::Result<T, self::Error>;
+// I do not see the use of Result from the controller module itself.
+// pub(in crate::controller) type Result<T> = std::result::Result<T, self::Error>;
 
 // We will split those to separate files later probably for each controller on each table for the database
 // That is still TBD.

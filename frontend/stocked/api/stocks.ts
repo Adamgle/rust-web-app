@@ -1,4 +1,4 @@
-'use client'
+"use client";
 
 // // Everything related to stocks API calls
 
@@ -9,7 +9,6 @@
 // // improve it.
 // // The important idea is that we need to figure out the framework
 // // of doing thing to easily layer down the error handling on top of we have.
-
 
 // export async function getStocks(): Promise<Stock[]> {
 //     return fetch("/stocks").then((res) => res.json()).catch((error) => {

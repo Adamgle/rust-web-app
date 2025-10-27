@@ -283,9 +283,22 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
                     The token is encrypted, thought it can be decrypted and the token itself is not secure, I know that you have to
                     set short expiration date for that token like 1-2 hours, I don't know how to secure it properly yet, 
                     currently we will not implement that.
+               -> If hosted, the credentials should be transferred through TLS.
      <TODO> 
           -> Learn about the JWTs, check if that would allow me to authorize the user
           only using the client side code.
+          <UPDATE>
+               We wil not implement JWTs out of the box, first we'll focus on session-based authentication, and if the time comes,
+               we will do the JWTs to unload the server and database calls to authorize the user when protected routes are called.
+     <UPDATE>
+          Doing your own auth seem to be more complicated than I have thought, and the idea of the application is that it would be production ready
+          and stripped of the basic insecurities like authentication, but I still feel like implementing it myself would create some opportunities
+          to learn, so I will precede.
+
+          We will do session-based auth, storing passwords hashes and salt
+          Redis storage could be used to help with unloading the database instead of the JWTs.
+          CSRF protection should be implemented. 
+          To make it even remotely secure the service should be accessible via TLS secure layer.
 
 ### THIS MUST BE AT THE END OF THE DOCUMENT #
 ### WE'RE STARTING A PROCESS, AND ONGOING PROCESS:
@@ -296,3 +309,6 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
 
 ### ISSUES
 1. Logger does not work as I have changed something while implementing tokio-console in the logger module.
+2. I don't know how to capture the error in the request chain but just log then in the place where they have happened.
+     Specifically when the error of missing sessions happens, first it is not logged to stdout and the associated
+     error of the thiserror macro attribute is not invoked.
