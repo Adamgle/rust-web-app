@@ -6,7 +6,7 @@ export function StockEntry({ stock }: { stock: Stock }) {
     <Link
       href={`/stocks/${stock.id}`}
       key={stock.id}
-      className="rounded-2xl bg-gray-800 text-white p-4 shadow-md hover:scale-105 transition"
+      className="rounded-2xl bg-gray-800 p-4 text-white shadow-md transition hover:scale-105"
     >
       <h3 className="text-lg font-semibold">{stock.abbreviation}</h3>
       <p className="text-sm">Price: ${stock.price}</p>
