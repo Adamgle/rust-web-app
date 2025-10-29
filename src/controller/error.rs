@@ -4,7 +4,7 @@ use crate::controller::{auth, stocks};
 // We could consider using that if some controllers would have common errors, but that seem unlikely.
 // That would be something like Io, or Validation, or something like that, but that would be probably
 // better to do in each controller separately.
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum Error {
     #[error("Stocks controller error: {0}")]
     Stocks(#[from] stocks::Error),

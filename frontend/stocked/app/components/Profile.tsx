@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { getSessionUser } from "../../api/hooks/getAuthSessions";
 
-function LoginButton() {
+export function LoginButton() {
   return (
     <Link
       href="/login"
-      className="bg-gray-700 text-white font-bold p-2 rounded h-fit text-xs self-center"
+      className="h-fit self-center rounded bg-gray-700 p-2 text-xs font-bold text-white"
     >
       Login
     </Link>
@@ -15,21 +15,21 @@ function LoginButton() {
 }
 
 export function Profile() {
-  const sessionUser = getSessionUser();
+  const { user, error } = getSessionUser();
 
-  if (!sessionUser) {
+  if (!user || error) {
     return <LoginButton />;
   }
 
-  const { name, image, balance } = sessionUser;
+  const { name, image, balance } = user;
 
   return (
-    <div className="flex flex-col gap-2 h-fit text-sm">
+    <div className="flex h-fit flex-col gap-2 text-sm">
       <div className="flex flex-row gap-4">
-        <div className="border rounded-sm p-2">{name}</div>
-        <div className="border rounded-sm p-2">{image}</div>
+        <div className="rounded-sm border p-2">{name}</div>
+        <div className="rounded-sm border p-2">{image}</div>
       </div>
-      <button className="bg-blue-500 text-white font-bold p-1 rounded text-sm">
+      <button className="rounded bg-blue-500 p-1 text-sm font-bold text-white">
         Balance {balance}
       </button>
     </div>
@@ -39,10 +39,10 @@ export function Profile() {
 export function Logo() {
   return (
     <div className="flex flex-col items-center justify-center gap-2">
-      <h1 className="bg-purple-500 text-white font-bold px-4 py-2 rounded saturate-100 self-start">
+      <h1 className="self-start rounded bg-purple-500 px-4 py-2 font-bold text-white saturate-100">
         Stocked
       </h1>
-      <button className="bg-blue-500 text-white font-bold p-3 rounded text-sm">
+      <button className="rounded bg-blue-500 p-3 text-sm font-bold text-white">
         Make beaucoup-Bucks
       </button>
     </div>

@@ -1,6 +1,6 @@
 use axum::response::IntoResponse;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone)]
 #[error("Stocks error")]
 pub enum Error {
     #[error(transparent)]

@@ -1,4 +1,6 @@
 mod error;
+use std::sync::Arc;
+
 use axum::extract::FromRef;
 pub use error::Error;
 use futures::TryFutureExt;
@@ -25,6 +27,9 @@ impl DatabaseConnection {
         // NOTE: Error as such should not happen at all, because we check for missing envs at both ends
         // we initializing envs.
         let connection_string = dotenvy::var(Env::DatabaseUrl.as_ref())
+            // TODO: Check if that from congestion maps to EnvError::MissingEnv but it probably does not.
+            // .map_err(EnvError::from)
+            .map_err(Arc::from)
             .map_err(EnvError::MissingEnv)
             .map_err(config::Error::from)?;
 

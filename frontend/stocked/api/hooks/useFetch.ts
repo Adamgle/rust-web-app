@@ -3,6 +3,23 @@
 import { useCallback } from "react";
 import useSWR, { SWRResponse } from "swr";
 
+// #[derive(serde::Serialize)]
+// pub struct ErrorResponse<'a> {
+//     // TODO: Define the appropriate fields for the error response
+//     // it will be serialized into JSON and pushed to the client.
+//     // I think it will be error-agnostic, meaning each variant will
+//     // produce the client error of the same structure.
+//     pub message: Cow<'a, str>,
+//     #[serde(with = "serde_status_code")]
+//     pub status: axum::http::StatusCode,
+// }
+
+// Error consistent with the API error responses.
+export interface ApiFetchError {
+  message: string;
+  status: number;
+}
+
 /**
     General purpose hook to fetch data from the API. Prefixes the path with API version if not present.
 
@@ -12,10 +29,10 @@ import useSWR, { SWRResponse } from "swr";
     NOTE: The naming is ambiguous, as this is not a general fetch hook, but an API fetch hook, though
     we are not fetching other resources and assume that this the the server API we are working with.
  */
-export function useFetch<Data>(
+export function useFetch<Data, Error = any>(
   path: string,
   options?: RequestInit
-): SWRResponse<Data> {
+) {
   const API_VERSION = "/api/v1";
   let endpoint = path.startsWith("/") ? path : `/${path}`;
 
@@ -28,7 +45,7 @@ export function useFetch<Data>(
     [endpoint, options]
   );
 
-  return useSWR<Data>(endpoint, callback);
+  return useSWR<Data, Error>(endpoint, callback);
 }
 
 // I believe it is better to move the fetcher outside of the hook to prevent
@@ -37,5 +54,11 @@ async function fetcher<Data>(
   url: string,
   options?: RequestInit
 ): Promise<Data> {
-  return fetch(url, options).then((res) => res.json());
+  const res = await fetch(url, options);
+
+  if (!res.ok) {
+    throw await res.json();
+  }
+
+  return res.json();
 }

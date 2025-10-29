@@ -4,13 +4,13 @@ DROP TABLE IF EXISTS stocks CASCADE;
 DROP TABLE IF EXISTS stocks_history CASCADE;
 
 
-DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS users CASCADE; 
 
 
 DROP TABLE IF EXISTS accounts CASCADE;
 
 
-DROP TABLE IF EXISTS sessions CASCADE;
+DROP TABLE IF EXISTS sessions CASCADE;  
 
 
 DROP TABLE IF EXISTS user_stocks CASCADE;
@@ -18,6 +18,10 @@ DROP TABLE IF EXISTS user_stocks CASCADE;
 
 DROP TABLE IF EXISTS user_sessions CASCADE;
 
+
+-- Enable the uuid-ossp extension for generating UUIDs
+-- functions like uuid_generate_v4()
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 
 -- TODO: Review the NOTE's;
@@ -118,8 +122,12 @@ CREATE TABLE users (
 
 
 CREATE TABLE sessions (
-    id SERIAL PRIMARY KEY,
-    -- session_token TEXT NOT NULL UNIQUE,
+    -- id SERIAL PRIMARY KEY,
+    -- Not sure about that, maybe that should be the primary key of the table.
+    -- session_id INTEGER NOT NULL UNIQUE,
+    -- id is not of type SERIAL as we will be generating UUIDs for that field inside the application.
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NOT NULL   
 );
@@ -129,7 +137,7 @@ CREATE TABLE sessions (
 -- But having that table we can select all session of some user, based on the user_id.
 CREATE TABLE user_sessions (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, session_id)
 );
 

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 // We are accessing the Result alias on the mod.rs, the parent module, and convention will be that
 // each module will have it's own result to mitigate the redundant calls when converting errors from one module to another.
@@ -6,7 +7,7 @@ use std::collections::HashSet;
 // and bring it to the current scope.
 // use super::Result;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum Error {
     // TODO: Possibly the naming of the variant could be better, we care about readability, not the type of the error, but since
     // we don't care about defining every possible error of the dotenv crate, it might be fine to just wrap the inner error of the crate
@@ -16,17 +17,17 @@ pub enum Error {
     // #[error("Environment variable has wrong format, should be SCREAMING_SNAKE_CASE: {0}")]
     // EnvWrongFormat(#[from] strum::ParseError),
     #[error(transparent)]
-    Other(#[from] anyhow::Error),
+    Other(#[from] Arc<anyhow::Error>),
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum EnvError {
     #[error("Error loading .env")]
-    Error(#[from] dotenvy::Error),
+    Error(#[from] Arc<dotenvy::Error>),
     // #[error("Error iterating over environment variables")]
     // EnvIterator(#[from] dotenvy::Error),
     #[error("Missing environment variable: {0}")]
-    MissingEnv(dotenvy::Error),
+    MissingEnv(Arc<dotenvy::Error>),
     #[error(
         "Environment variable declared in the .env file has wrong format, should be SCREAMING_SNAKE_CASE: {0}"
     )]
@@ -55,7 +56,19 @@ pub enum EnvError {
         translation: String,
     },
     #[error("I/O error occurred: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] Arc<std::io::Error>),
     #[error("Catch all variant: {0}")]
-    Other(#[from] anyhow::Error),
+    Other(#[from] Arc<anyhow::Error>),
+}
+
+impl From<dotenvy::Error> for EnvError {
+    fn from(err: dotenvy::Error) -> Self {
+        EnvError::Error(Arc::new(err))
+    }
+}
+
+impl From<std::io::Error> for EnvError {
+    fn from(err: std::io::Error) -> Self {
+        EnvError::Io(Arc::new(err))
+    }
 }

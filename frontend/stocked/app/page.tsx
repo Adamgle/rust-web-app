@@ -9,7 +9,7 @@ import { Stocks } from "./components/Stocks";
 export default function Page() {
   // return <h1 className="text-2xl">Stocked | Make beaucoup-Bucks</h1>;
   return (
-    <div className="flex flex-col items-center justify-center gap-12 w-full">
+    <div className="flex w-full flex-col items-center justify-center gap-12 p-8">
       <Header />
       <div className="flex w-full max-w-5xl gap-8">
         <Navbar />

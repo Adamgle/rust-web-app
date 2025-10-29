@@ -1,3 +1,7 @@
+#![allow(clippy::needless_return)]
+
+use std::sync::Arc;
+
 pub use prelude::*;
 
 pub mod config;
@@ -7,7 +11,12 @@ mod error;
 pub mod logger;
 pub mod prelude;
 
-use axum::Router;
+use axum::{
+    Router,
+    extract::MatchedPath,
+    http::Request,
+    middleware::{Next, from_fn},
+};
 
 use crate::{config::Config, database::DatabaseConnection};
 
@@ -26,16 +35,42 @@ pub async fn run(_config: config::Config) -> crate::Result<()> {
 
     let app = Router::<AppState>::new()
         .nest("/api/v1", api_router)
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http()
+                .make_span_with(|req: &Request<axum::body::Body>| {
+                    let method = req.method();
+                    let uri = req.uri();
+
+                    let matched_path = req.extensions().get::<MatchedPath>().map(|mp| mp.as_str());
+
+                    tracing::debug_span!("request", %method, %uri, matched_path)
+                }) // Do nothing on failure as we already handling the failures in our own span
+                .on_failure(()),
+        )
+        .layer(from_fn(log_app_errors))
         .layer(tower_cookies::CookieManagerLayer::new())
         .with_state(AppState { database });
 
     let listener = tokio::net::TcpListener::bind(Config::APP_SOCKET_ADDR).await?;
+
     tracing::debug!("Listening on {}", Config::APP_SOCKET_ADDR);
 
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+// Our middleware is responsible for logging error details internally
+async fn log_app_errors(request: axum::extract::Request, next: Next) -> axum::response::Response {
+    let response = next.run(request).await;
+
+    // If the response contains an AppError Extension, log it.
+    if let Some(err) = response.extensions().get::<Arc<self::Error>>() {
+        let message = format!("Shoot, ...: {}", err);
+        tracing::error!(?err, %message);
+    }
+
+    return response;
 }
 
 // pub async fn serve(config: Config, db: PgPool) -> anyhow::Result<()> {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useFetch } from "./useFetch";
+import { ApiFetchError, useFetch } from "./useFetch";
 
 interface SessionUser {
   name: string;
@@ -8,12 +8,17 @@ interface SessionUser {
   balance: string;
 }
 
+// interface SessionUserError extends FetchError {}
+
 // Client side function to authorize the access to protected routes and resources and validate
 // that the user is logged in and is valid.
 //
 // Requests the server endpoint that would validate the session stored in the cookies, or
 // in the case of the JWT, I guess, from the "Authorization" header.
-export function getSessionUser(): SessionUser | undefined {
+export function getSessionUser(): {
+  user?: SessionUser;
+  error?: ApiFetchError;
+} {
   // We have two options:
   // 1. We would expose endpoint that would validate the object stored in the cookies to be valid and exists in the database
   // by using some kind of ID, checking if that exists in the database
@@ -48,7 +53,7 @@ export function getSessionUser(): SessionUser | undefined {
     data: user,
     error,
     isLoading,
-  } = useFetch<SessionUser>("auth/session");
+  } = useFetch<SessionUser, ApiFetchError>("auth/session");
 
   // TODO: Think about how to handle errors on the client side.
   // I would also imagine that the errors from the client side would be persisted somewhere
@@ -56,12 +61,19 @@ export function getSessionUser(): SessionUser | undefined {
   // I believe Postgresql has a JSON support from know on, and that could be handy
   // for logging unstructured errors from the client side.
 
-  console.log(error);
+  if (error) {
+    // NOTE: Maybe that should log the error to database or something for later analysis.
+    // But that is not really an error, it's just the user is not logged in.
 
-  if (error) throw error;
+    return { user: undefined, error };
+  }
+
+  // NOTE: It is possible that an infinite recursion will happen on that throw, as useFetch will retry infinitely,
+  // when that condition will repeatedly comply
   if (!isLoading && !user) throw new Error("Failed to fetch auth session");
 
   // TODO: user needs to be validated against the database.
+  // UPDATE: no
 
-  return user;
+  return { user, error: undefined };
 }

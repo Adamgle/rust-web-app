@@ -312,3 +312,4 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
 2. I don't know how to capture the error in the request chain but just log then in the place where they have happened.
      Specifically when the error of missing sessions happens, first it is not logged to stdout and the associated
      error of the thiserror macro attribute is not invoked.
+3. ErrorResponse struct is not treated as an actual response, we need to find out how to make it recognize as a response.

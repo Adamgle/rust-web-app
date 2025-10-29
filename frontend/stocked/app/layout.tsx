@@ -29,7 +29,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`bg-background max-full antialiased p-8 geist-sans ${geistMono.className}`}
+        className={`bg-background max-full geist-sans antialiased ${geistMono.className}`}
       >
         {children}
       </body>
