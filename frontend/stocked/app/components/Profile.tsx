@@ -6,7 +6,7 @@ import { getSessionUser } from "../../api/hooks/getAuthSessions";
 export function LoginButton() {
   return (
     <Link
-      href="/login"
+      href="/auth/login"
       className="h-fit self-center rounded bg-gray-700 p-2 text-xs font-bold text-white"
     >
       Login

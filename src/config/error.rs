@@ -14,8 +14,6 @@ pub enum Error {
     // in a variant, and then we can just infer from the error what happen.
     #[error(transparent)]
     Env(#[from] EnvError),
-    // #[error("Environment variable has wrong format, should be SCREAMING_SNAKE_CASE: {0}")]
-    // EnvWrongFormat(#[from] strum::ParseError),
     #[error(transparent)]
     Other(#[from] Arc<anyhow::Error>),
 }
@@ -24,8 +22,6 @@ pub enum Error {
 pub enum EnvError {
     #[error("Error loading .env")]
     Error(#[from] Arc<dotenvy::Error>),
-    // #[error("Error iterating over environment variables")]
-    // EnvIterator(#[from] dotenvy::Error),
     #[error("Missing environment variable: {0}")]
     MissingEnv(Arc<dotenvy::Error>),
     #[error(

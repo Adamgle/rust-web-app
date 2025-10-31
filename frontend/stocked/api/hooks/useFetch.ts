@@ -1,24 +1,34 @@
 "use client";
 
 import { useCallback } from "react";
-import useSWR, { SWRResponse } from "swr";
-
-// #[derive(serde::Serialize)]
-// pub struct ErrorResponse<'a> {
-//     // TODO: Define the appropriate fields for the error response
-//     // it will be serialized into JSON and pushed to the client.
-//     // I think it will be error-agnostic, meaning each variant will
-//     // produce the client error of the same structure.
-//     pub message: Cow<'a, str>,
-//     #[serde(with = "serde_status_code")]
-//     pub status: axum::http::StatusCode,
-// }
+import useSWR from "swr";
 
 // Error consistent with the API error responses.
+// That is error that originates from the server-side.
 export interface ApiFetchError {
   message: string;
   status: number;
 }
+
+// That error is highly TBD, as I am not sure how to handle errors
+// I am planning to use that as a error that originated from the client side, caused by the client mistakes.
+// For example, validation errors, network errors, timeouts, etc.
+// TODO: We could think about making that a class extending the built-in Error class, but I do not know how errors work in
+// javascript in-depth.
+export interface ApiClientError {
+  message: string;
+}
+
+// class ApiClientError extends Error {
+//   constructor(message: string) {
+//     super(message);
+//     this.name = "ApiClientError";
+//   }
+
+//   static fromMessage(message: string): ApiClientError {
+//     return new ApiClientError(message);
+//   }
+// }
 
 /**
     General purpose hook to fetch data from the API. Prefixes the path with API version if not present.
@@ -30,19 +40,12 @@ export interface ApiFetchError {
     we are not fetching other resources and assume that this the the server API we are working with.
  */
 export function useFetch<Data, Error = any>(
-  path: string,
-  options?: RequestInit
+  endpoint: string,
+  options: RequestInit = {},
 ) {
-  const API_VERSION = "/api/v1";
-  let endpoint = path.startsWith("/") ? path : `/${path}`;
-
-  if (!path.startsWith(API_VERSION)) {
-    endpoint = API_VERSION + endpoint;
-  }
-
   const callback = useCallback(
     () => fetcher<Data>(endpoint, options),
-    [endpoint, options]
+    [endpoint, options],
   );
 
   return useSWR<Data, Error>(endpoint, callback);
@@ -50,15 +53,39 @@ export function useFetch<Data, Error = any>(
 
 // I believe it is better to move the fetcher outside of the hook to prevent
 // to prevent the re-allocation on each render and call to useFetch.
-async function fetcher<Data>(
-  url: string,
-  options?: RequestInit
+export async function fetcher<Data>(
+  path: string,
+  options: RequestInit = {},
 ): Promise<Data> {
-  const res = await fetch(url, options);
+  const API_VERSION = "/api/v1";
+  let endpoint = path.startsWith("/") ? path : `/${path}`;
 
-  if (!res.ok) {
-    throw await res.json();
+  if (!path.startsWith(API_VERSION)) {
+    endpoint = API_VERSION + endpoint;
   }
 
-  return res.json();
+  console.log("Sending headers: ", {
+    headers: {
+      "Content-Type": "application/json",
+      ...(options?.headers || {}),
+    },
+    ...options,
+  });
+
+  const res = await fetch(endpoint, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(options?.headers || {}),
+    },
+    ...options,
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    // Tha should be of type ApiFetchError
+    throw data as ApiFetchError;
+  }
+
+  return data;
 }

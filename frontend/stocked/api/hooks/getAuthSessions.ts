@@ -2,7 +2,7 @@
 
 import { ApiFetchError, useFetch } from "./useFetch";
 
-interface SessionUser {
+export interface SessionUser {
   name: string;
   image?: string;
   balance: string;

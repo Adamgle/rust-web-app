@@ -8,7 +8,6 @@ pub use error::Error;
 // pub(in crate::controller) type Result<T> = std::result::Result<T, self::Error>;
 
 // We will split those to separate files later probably for each controller on each table for the database
-// That is still TBD.
 
 // Also, that is the mod.rs file, probably we will keep it short and then just separate the controller files into modules
 // although that kind of sound like an overkill. depends how much it will grow.

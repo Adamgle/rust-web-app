@@ -15,10 +15,18 @@ pub enum Error {
     MissingSessionInDatabase,
     #[error("Invalid ssid cookie: {0}")]
     InvalidSessionCookie(String),
-    #[error("Session expired at {0}")]
+    #[error("Session expired at: {0}")]
     SessionExpired(String),
     #[error("User not found")]
     UserNotFound,
+    #[error("Weak password does not meet the policy requirements: {0}")]
+    WeakPassword(String),
+    // NOTE: We are not leaking the inner error message to avoid leaking sensitive information,
+    // but it will be logged in the middleware on the server-side if one occur.
+    #[error("Internal Server Error")]
+    PasswordHashError(#[from] argon2::password_hash::Error),
+    #[error("Email already taken: {0}")]
+    EmailTaken(String),
 }
 
 impl IntoResponse for Error {
@@ -27,6 +35,7 @@ impl IntoResponse for Error {
 
         let message = Cow::Owned(self.to_string());
 
+        // This should not leak sensitive information.
         let representation = match self {
             Error::MissingSessionCookie => ErrorResponse {
                 status: axum::http::StatusCode::UNAUTHORIZED,
@@ -52,6 +61,21 @@ impl IntoResponse for Error {
                 status: axum::http::StatusCode::NOT_FOUND,
                 message,
             },
+            Error::WeakPassword(_) => ErrorResponse {
+                status: axum::http::StatusCode::BAD_REQUEST,
+                message,
+            },
+            Error::PasswordHashError(_) => ErrorResponse {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                // We are not using the display trait for the error as that contains sensitive information.
+                // NOTE: I do not think that is the best way to do it, the display trait method
+                // should not contain sensitive information in the first place.
+                message,
+            },
+            Error::EmailTaken(_) => ErrorResponse {
+                status: axum::http::StatusCode::CONFLICT,
+                message,
+            },
         };
 
         return self.to_response(representation);
@@ -71,3 +95,9 @@ impl From<sqlx::Error> for Error {
         Self::DatabaseError(crate::database::Error::from(err))
     }
 }
+
+// impl From<argon2::Error> for Error {
+//     fn from(err: argon2::Error) -> Self {
+//         Self::PasswordHashError(Arc::new(err))
+//     }
+// }

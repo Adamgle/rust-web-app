@@ -1,4 +1,5 @@
 mod error;
+pub mod types;
 use std::sync::Arc;
 
 use axum::extract::FromRef;

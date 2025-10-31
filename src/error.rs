@@ -5,23 +5,27 @@
 // you can bring something to scope without referring to the module and know that something is and error.
 // The main Error enum will be always referred to with the module, like config::Error.
 
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, fmt::Display, sync::Arc};
 
 use axum::response::IntoResponse;
-use tracing::info;
 
 #[derive(thiserror::Error, Debug, Clone)]
-#[error("Config error occurred: {0}")]
+// #[error("Config error occurred: {0}")]
+#[error(transparent)]
 pub enum Error {
     // The idea is variants per module that wrap it's inner errors.
     Config(#[from] crate::config::Error),
     // There is not module called database. Think about making one.
     Database(#[from] crate::database::Error),
     Controller(#[from] crate::controller::Error),
-    #[error("I/O error occurred: {0}")]
+    // When we use the value interpolation here, we must not leak any sensitive information.
+    // We would be using that as a "message" for the client error, of course, if data is transparent
+    // that it may be included. Of course that only applies to error implementing IntoResponse.
+    // Not interpolating the inner error is not an issues, as the middleware would still log it.
+    // #[error("I/O error occurred")]
     Io(#[from] Arc<std::io::Error>),
+    // #[error(transparent)]
     // That is kind of a catch-all variant
-    #[error(transparent)]
     Other(#[from] Arc<anyhow::Error>),
 }
 
@@ -37,7 +41,7 @@ impl From<anyhow::Error> for Error {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ErrorResponse<'a> {
     // TODO: Define the appropriate fields for the error response
     // it will be serialized into JSON and pushed to the client.
@@ -46,6 +50,15 @@ pub struct ErrorResponse<'a> {
     pub message: Cow<'a, str>,
     #[serde(with = "serde_status_code")]
     pub status: axum::http::StatusCode,
+}
+
+impl Default for ErrorResponse<'_> {
+    fn default() -> Self {
+        Self {
+            message: Cow::Borrowed("Internal Server Error"),
+            status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
 }
 
 mod serde_status_code {
@@ -89,7 +102,7 @@ impl<'a> IntoResponse for ErrorResponse<'a> {
 // We need methods to provide that conversion, and,
 pub trait ErrorExt
 where
-    Self: Sized + Clone + IntoResponse,
+    Self: Display + Sized + Clone + IntoResponse,
 {
     /// Convert the variant error into the crate-level error to allow inserting it into the `Extension` of the response.
     fn to(self) -> crate::Error;
@@ -100,7 +113,9 @@ where
     // fn to_response(self) -> axum::response::Response;
     fn to_response(self, representation: ErrorResponse) -> axum::response::Response {
         let s = self.clone();
-        let mut response = representation.into_response();
+        let mut response = representation.clone().into_response();
+
+        println!("s: {} | response: {:?}", s, representation);
 
         // For middleware-tower logging
         response.extensions_mut().insert(Arc::new(Self::to(s)));
@@ -119,20 +134,18 @@ impl ErrorExt for Error {
 
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
-        let message = format!("Shoot, ...: {}", self);
-        tracing::error!("crate-level error: {}", message);
+        // NOTE: I think at this level we cannot respond with anything different that just 500.
+        // match self {
+        //     Error::Config(_) | Error::Database(_) | Error::Controller(_) | Error::Io(_) | Error::Other(_) => ,
+        //     Error::Database(error) => todo!(),
+        //     Error::Controller(error) => todo!(),
+        //     Error::Io(error) => todo!(),
+        //     Error::Other(error) => todo!(),
+        // };
 
-        let repr = match self {
-            _ => ErrorResponse {
-                message: Cow::from(message),
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            },
-        };
+        // NOTE: I think at this level we cannot respond with anything different that just 500.
 
-        // We need to save the crate-level error into the response Extensions to log it in the middleware layer.
-        // response.extensions_mut().insert::<Arc<Self>>(error);
-
-        return self.to_response(repr);
+        return self.to_response(ErrorResponse::default());
     }
 }
 

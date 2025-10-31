@@ -108,16 +108,17 @@ CREATE TABLE users (
     -- session_id INTEGER UNIQUE REFERENCES sessions(id),
     -- NOTE: balance can be negative, that is correct. Most of time balance will be negative as
     -- this is what happens when you play with other people money.
-    balance REAL NOT NULL,
+    balance REAL NOT NULL DEFAULT 0.0,
     -- That would represent the percent change in the user's portfolio value
     -- since the last data revalidation as the stocks may change their prices.
     delta REAL NOT NULL CHECK (
         delta > -100
         AND delta < 100
-    ),
+    ) DEFAULT 0.0,
     -- auth related fields 
-    pwd_hash TEXT NOT NULL,
-    pwd_salt TEXT NOT NULL
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL
 );
 
 
@@ -129,17 +130,18 @@ CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP NOT NULL   
+    expires_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '7 days')
 );
 
 -- That is junction table between users and sessions.
 -- We cannot store single session_id inside the users table as there could be multiple sessions per user.
 -- But having that table we can select all session of some user, based on the user_id.
-CREATE TABLE user_sessions (
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    PRIMARY KEY (user_id, session_id)
-);
+-- NOTE: That table is useless, we can just generate another row in the session with the same user_id.
+-- CREATE TABLE user_sessions (
+--     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+--     session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+--     PRIMARY KEY (user_id, session_id)
+-- );
 
 -- That is junction table between users and stocks.
 -- Is uses a composite primary key (user_id, stock_id) to retrieve the user related stocks.
@@ -165,9 +167,9 @@ VALUES
 
 -- Test user_stocks insertion
 INSERT INTO
-    users (account_id, balance, delta, pwd_hash, pwd_salt)
+    users (account_id, balance, delta, email, password_hash, password_salt)
 VALUES
-    (1, 1000.0, 0.0, 'hashed_password', 'salt_value') RETURNING id AS user_id;
+    (1, 1000.0, 0.0, 'user@example.com', 'hashed_password', 'salt_value') RETURNING id AS user_id;
 
 
 -- Assume the returned id is 1

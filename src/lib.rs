@@ -61,6 +61,10 @@ pub async fn run(_config: config::Config) -> crate::Result<()> {
 }
 
 // Our middleware is responsible for logging error details internally
+/// Middleware that logs application errors found in responses.
+/// 
+/// It logs internal errors, not exposed to the client, as well as the one that 
+/// are using the implementation of the `std::fmt::Display` trait.
 async fn log_app_errors(request: axum::extract::Request, next: Next) -> axum::response::Response {
     let response = next.run(request).await;
 

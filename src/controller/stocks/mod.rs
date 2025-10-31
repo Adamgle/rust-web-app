@@ -3,7 +3,7 @@ pub use error::Error;
 use sqlx::types::chrono;
 use tracing::info;
 
-use crate::{AppState, database::DatabaseConnection};
+use crate::{AppState, controller::error::GenericControllerError, database::DatabaseConnection};
 use axum::{
     extract::{Json, Path, State},
     response::IntoResponse,
@@ -66,9 +66,9 @@ pub async fn get_stock(
 ) -> self::Result<impl IntoResponse> {
     let id = id
         .parse::<i32>()
-        .map_err(|_| self::Error::IdNotInPostgresSerialRange { id })
+        .map_err(|_| GenericControllerError::IdNotInPostgresSerialRange { id })
         .and_then(|id| match id < 1 {
-            true => Err(self::Error::IdNotInPostgresSerialRange { id: id.to_string() }),
+            true => Err(GenericControllerError::IdNotInPostgresSerialRange { id: id.to_string() }),
             false => Ok(id),
         })?;
 
