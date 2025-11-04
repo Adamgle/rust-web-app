@@ -303,7 +303,7 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
 ### THIS MUST BE AT THE END OF THE DOCUMENT #
 ### WE'RE STARTING A PROCESS, AND ONGOING PROCESS:
 => <ABORTED> Get data for the stock market, that would be 
-     -> Stock market history, the broader time frame, the better.
+-> Stock market history, the broader time frame, the better.
      => <ABORTED> -> We are focusing on the technical details from now on and then eventually 
           -> get involved in the actual data processing of the real world, if any.
 
@@ -313,3 +313,12 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
      Specifically when the error of missing sessions happens, first it is not logged to stdout and the associated
      error of the thiserror macro attribute is not invoked.
 3. ErrorResponse struct is not treated as an actual response, we need to find out how to make it recognize as a response.
+4. Main authentication login is finished but there are a lot to consider:
+     1. No CSRF protection for SSID cookies.
+     2. Taken emails are enumerated during registration logic, although that is kind off by design, thought maybe I should change the design.
+     3. No timing attacks protection that could disclose information like email existence, although it is transparent here, should be protected. 
+     4. Cookies needs to be signed, as currently client can enumerate all uuid, although that is infeasible to brute-force, but would prevent
+          querying the database as it would be early detected as forged and malformed.
+          We would hold some single secret server-side, verify if the cookie is valid given that key and then precede with the request or abort early.
+     5. Errors that occur, client and server-side are not stored anywhere, I would like to able to hold the client errors in some kind of Postgres table
+          as a JSON type thought I need to explore that, surely it would be unstructured logs, or semi-structure.

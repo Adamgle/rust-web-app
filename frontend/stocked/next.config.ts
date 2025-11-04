@@ -10,8 +10,8 @@ const nextConfig: NextConfig = {
       //   destination: `http://127.0.0.1:5000/api/v1/products`,
       // },
       {
-        source: '/api/v1/:path*',
-        destination: `${process.env.SERVER_URL}/api/v1/:path*`,  // Proxy to Backend
+        source: "/api/v1/:path*",
+        destination: `${process.env.SERVER_URL}/api/v1/:path*`, // Proxy to Backend
         // has: [
         //   {
         //     type: 'header',
@@ -19,9 +19,9 @@ const nextConfig: NextConfig = {
         //     value: process.env.API_KEY
         //   }
         // ]
-      }
-    ]
-  }
+      },
+    ];
+  },
 };
 
 export default nextConfig;

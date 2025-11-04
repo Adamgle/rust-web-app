@@ -117,8 +117,8 @@ CREATE TABLE users (
     ) DEFAULT 0.0,
     -- auth related fields 
     email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    password_salt TEXT NOT NULL
+    password_hash TEXT NOT NULL
+    -- password_salt TEXT NOT NULL
 );
 
 
@@ -167,9 +167,9 @@ VALUES
 
 -- Test user_stocks insertion
 INSERT INTO
-    users (account_id, balance, delta, email, password_hash, password_salt)
+    users (account_id, balance, delta, email, password_hash)
 VALUES
-    (1, 1000.0, 0.0, 'user@example.com', 'hashed_password', 'salt_value') RETURNING id AS user_id;
+    (1, 1000.0, 0.0, 'user@example.com', 'hashed_password') RETURNING id AS user_id;
 
 
 -- Assume the returned id is 1

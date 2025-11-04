@@ -18,7 +18,7 @@ pub struct DatabaseUser {
     pub delta: f32,
     pub email: String,
     pub password_hash: String,
-    pub password_salt: String,
+    // pub password_salt: String,
 }
 
 // NOTE: That table is useless, we can just generate another row in the session with the same user_id.
@@ -39,6 +39,8 @@ pub struct ClientUser {
     pub id: i32,
     pub balance: f32,
     pub delta: f32,
+    pub email: String,
+    pub created_at: chrono::NaiveDate,
 }
 
 impl From<DatabaseUser> for ClientUser {
@@ -47,6 +49,8 @@ impl From<DatabaseUser> for ClientUser {
             id: user.id,
             balance: user.balance,
             delta: user.delta,
+            email: user.email,
+            created_at: user.created_at,
         }
     }
 }

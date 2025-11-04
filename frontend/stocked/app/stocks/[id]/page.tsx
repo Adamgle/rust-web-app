@@ -2,8 +2,8 @@
 
 import { useParams } from "next/navigation";
 import { useFetch } from "../../../api/hooks/useFetch";
-import { Stock } from "../../../types/types";
 import StockEntry from "../../components/StockEntry";
+import { Stock } from "../../../api/types/schema";
 
 export default function Page() {
   const { id } = useParams();
@@ -21,7 +21,7 @@ export default function Page() {
   }
 
   return (
-    <div className="w-full flex flex-col gap-4">
+    <div className="flex w-full flex-col gap-4">
       <h2 className="text-xl font-bold">{stock.abbreviation}</h2>
       <StockEntry stock={stock} />
     </div>

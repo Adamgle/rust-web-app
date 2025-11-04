@@ -1,7 +1,7 @@
 "use client";
 
 import { useFetch } from "../../api/hooks/useFetch";
-import { Stock } from "../../types/types";
+import { Stock } from "../../api/types/schema";
 import StockEntry from "../components/StockEntry";
 
 export default function Page() {

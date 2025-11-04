@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { SessionUser } from "../../../api/hooks/getAuthSessions";
-import { ApiClientError, ApiFetchError } from "../../../api/hooks/useFetch";
+import { ApiClientError } from "../../../api/hooks/useFetch";
+import { SessionUser } from "../../../api/types/schema";
+import { fetcher } from "../../../utils/fetcher";
+import { Dispatch, SetStateAction, useState } from "react";
+import { useRouter } from "next/navigation";
 
 // export type onSubmitType = (e: React.FormEvent<HTMLFormElement>) => void;
 
 export interface LoginPageProps {
   title?: string;
-  onSubmit?: (
+  onSubmit: (
     e: React.FormEvent<HTMLFormElement>,
     // NOTE: Maybe that should be generic.
   ) => Promise<SessionUser | ApiClientError>;
@@ -41,20 +44,98 @@ export const validatePasswordPolicy = (password: string): boolean => {
     has_special ||= SPECIAL_CHARACTERS.includes(char);
   }
 
+  console.log({ has_uppercase, has_lowercase, has_digit, has_special });
+
   return has_uppercase && has_lowercase && has_digit && has_special;
 };
 
 const handleLogin: LoginPageProps["onSubmit"] = async (e) => {
-  throw { message: "Not implemented" } as ApiClientError;
+  e.preventDefault();
+
+  const formData = new FormData(e.currentTarget);
+
+  const { email, password } = Object.fromEntries(formData) || {};
+
+  if (!email || !password) {
+    // Kind of shenanigans here.
+    const error = { message: "Invalid email or password" } as ApiClientError;
+    console.error("Validation error: ", error);
+
+    return error;
+  }
+
+  try {
+    // That can only return ApiFetchError so the catch error is probably of that type.
+    const data = await fetcher<SessionUser>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+
+    return data;
+  } catch (error) {
+    // TODO: I don't know what happens here, that coercion is probably unsafe.
+    console.error(error);
+
+    throw error;
+  }
 };
+
+function LoginFormSubmit() {
+  return (
+    <button
+      type="submit"
+      className="cursor-pointer rounded bg-black p-3 text-sm font-bold text-white"
+    >
+      Submit
+    </button>
+  );
+}
 
 export function LoginForm({
   onSubmit,
 }: {
-  onSubmit?: LoginPageProps["onSubmit"];
+  onSubmit: LoginPageProps["onSubmit"];
 }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+
+  const handleOnSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+
+    try {
+      await onSubmit(e);
+
+      // Redirect on successful login
+      router.push("/");
+    } catch (error: any) {
+      // Capture API or validation errors
+      console.error("Login error:", error);
+
+      setError(
+        error?.message || "Unexpected error occurred. Please try again.",
+      );
+    }
+  };
+
   return (
-    <form onSubmit={onSubmit} className="flex h-fit w-full flex-col gap-4">
+    <form
+      onSubmit={handleOnSubmit}
+      className="flex h-fit w-full flex-col gap-4"
+    >
+      {error && (
+        <div className="mb-4 rounded border bg-red-100 px-4 py-3 text-red-700">
+          <div className="flex items-center justify-between">
+            <span>{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="ml-2 cursor-pointer text-red-700 hover:text-red-900"
+            >
+              x
+            </button>
+          </div>
+        </div>
+      )}
       <label htmlFor="email">
         <input
           type="email"
@@ -75,12 +156,7 @@ export function LoginForm({
           className="w-full rounded bg-gray-200 p-3 text-sm font-bold text-black"
         />
       </label>
-      <button
-        type="submit"
-        className="cursor-pointer rounded bg-black p-3 text-sm font-bold text-white"
-      >
-        Submit
-      </button>
+      <LoginFormSubmit />
     </form>
   );
 }
@@ -101,12 +177,12 @@ function RegisterLink({ title }: { title: LoginPageProps["title"] }) {
   );
 }
 
-export function LoginPage({ title = "Login Page", onSubmit }: LoginPageProps) {
+export function LoginPage({ title, onSubmit }: LoginPageProps) {
   return (
     <div className="flex h-screen w-full items-center justify-center bg-gray-100 p-4">
       <div className="flex w-full max-w-md flex-col gap-6 rounded-lg bg-gray-900 p-8 text-white shadow-lg">
         <div className="text-center">
-          <h1 className="mb-2 text-2xl font-bold">{title || "Login Page"}</h1>
+          <h1 className="mb-2 text-2xl font-bold">{title}</h1>
           {title?.toLowerCase().includes("login") && (
             <p className="text-sm text-gray-400">Welcome back!</p>
           )}
@@ -119,7 +195,7 @@ export function LoginPage({ title = "Login Page", onSubmit }: LoginPageProps) {
 }
 
 const Page = () => {
-  return <LoginPage title={undefined} onSubmit={handleLogin} />;
+  return <LoginPage title="Login page" onSubmit={handleLogin} />;
 };
 
 export default Page;

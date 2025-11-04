@@ -1,32 +1,25 @@
 "use client";
 
-import { ApiError } from "next/dist/server/api-utils";
-import {
-  ApiClientError,
-  ApiFetchError,
-  fetcher,
-} from "../../../api/hooks/useFetch";
+import { ApiClientError } from "../../../api/hooks/useFetch";
 import {
   LoginPage,
   LoginPageProps,
   validatePasswordPolicy,
 } from "../login/page";
-import { SessionUser } from "../../../api/hooks/getAuthSessions";
+import { fetcher } from "../../../utils/fetcher";
+import { SessionUser } from "../../../api/types/schema";
 
 const handleRegister: LoginPageProps["onSubmit"] = async (e) => {
-  console.log("Register form submitted");
   e.preventDefault();
 
   const formData = new FormData(e.currentTarget);
 
   const { email, password } = Object.fromEntries(formData) || {};
 
-  console.log({ email, password });
-
   if (!email || !password || !validatePasswordPolicy(password.toString())) {
     // Kind of shenanigans here.
     const error = { message: "Invalid email or password" } as ApiClientError;
-    console.log("Validation error:", error);
+    console.error("Validation error: ", error);
 
     return error;
   }
@@ -38,7 +31,6 @@ const handleRegister: LoginPageProps["onSubmit"] = async (e) => {
       body: JSON.stringify({ email, password }),
     });
 
-    console.log("Registration successful:", data);
     return data;
   } catch (error) {
     // TODO: I don't know what happens here, that coercion is probably unsafe.

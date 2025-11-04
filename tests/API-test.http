@@ -1,0 +1,29 @@
+# NOTE: This extension does preserve the state of the cookies, which
+# is not what I have expected and may be error prone in the future testing.
+
+
+# When you are making the request to :3000/auth/register it would not proxy that to :3000/api/v1/auth/register and then to :5000/api/v1/auth/register
+# as then configuration of the rewrites are to go from something that begins with /api/v1/ to the backend server. 
+# So doing that request to the frontend it would just try to handle it itself, as Next.js is a backend framework as well.
+# But there is not POST /auth/register route in the frontend, thought we are defining the proxy.ts for the application
+# and the pathname happens to exists in the proxy matcher, so it would match that and evaluate to NextResponse.next().
+# Also, the reason why it is not 404, is that the route exists in the Next.js application, but has no defined POST request.
+# That is weird to me, but it seem like you can route to any defined route even if there is no handler for that method,
+POST http://localhost:5000/api/v1/auth/register HTTP/1.1
+Content-Type: application/json
+
+{ 
+    "email": "1asd273@example.com",
+    "password": "Password1!"
+}
+
+
+# PS C:\Users\adamb> Invoke-WebRequest -Uri "http://localhost:3000/auth/register" `
+# >>   -Method POST `
+# >>   -Headers @{ "Content-Type" = "application/json" } `
+# >>   -Body '{ "email": "1123273@examp123le.com", "password": "Password1!" }'
+
+### 
+
+# That would also work, even if there is no POST handle for that route.
+POST http://localhost:3000/me/stocks HTTP/1.1

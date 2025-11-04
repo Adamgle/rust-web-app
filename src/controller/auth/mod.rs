@@ -2,27 +2,29 @@
 
 mod error;
 
+use std::sync::Arc;
+
 use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 
 pub use error::Error;
-use sqlx::types::Uuid;
+use sqlx::{Executor, Pool, types::Uuid};
 use tower_cookies::{Cookie, Cookies};
-use tracing::info;
 
 use crate::{
     AppState,
+    controller::{cookies, types::ApiStatusResponse},
     database::{
         DatabaseConnection,
-        types::{ClientUser, DatabaseUser},
+        types::{ClientUser, DatabaseSession, DatabaseUser},
     },
 };
 use axum::{
     Json, Router,
     extract::State,
-    http::HeaderMap,
+    response::IntoResponse,
     routing::{get, post},
 };
 
@@ -36,22 +38,22 @@ pub fn router() -> Router<AppState> {
         .route("/auth/logout", post(logout_user))
 }
 
-#[axum::debug_handler]
-pub async fn get_auth_session(
-    State(AppState {
-        database: DatabaseConnection(conn),
-        ..
-    }): State<AppState>,
-    cookies: Cookies,
-) -> self::Result<Json<ClientUser>> {
-    // Validates the JWT from the request "Authorization" header or session id.
-    let Some(cookie_ssid) = cookies.get("SSID") else {
+pub async fn get_server_side_session(
+    conn: &Pool<sqlx::Postgres>,
+    cookies: &Cookies,
+) -> self::Result<ClientUser> {
+    let Some(cookie_ssid) = cookies.get(cookies::SSID) else {
         return Err(self::Error::MissingSessionCookie);
     };
 
     let cookie_ssid = cookie_ssid.value();
-    let cookie_ssid = Uuid::parse_str(cookie_ssid)
-        .map_err(|e| self::Error::InvalidSessionCookie(e.to_string()))?;
+
+    // TODO: Test the error, how it behaves when the UUID is invalid.
+    let cookie_ssid =
+        Uuid::parse_str(cookie_ssid).map_err(|e| self::Error::InvalidSessionCookie {
+            ssid: cookie_ssid.to_string(),
+            source: e,
+        })?;
 
     // Check if the sessions exists for the ssid cookie.
     // NOTE: Not sure why I have to cast the $1 to uuid, but without it it fails.
@@ -59,7 +61,7 @@ pub async fn get_auth_session(
         "SELECT expires_at, user_id FROM sessions WHERE sessions.id = $1::uuid",
         cookie_ssid
     )
-    .fetch_optional(&conn)
+    .fetch_optional(conn)
     .await?
     .map(|r| (r.expires_at, r.user_id)) else {
         // NOTE: Not sure if that error is appropriate to auth::Error, but it is also not database::Error,
@@ -76,21 +78,32 @@ pub async fn get_auth_session(
 
     let Some(user) = sqlx::query_as!(
         ClientUser,
-        "SELECT id, balance, delta FROM users WHERE users.id = $1",
+        "SELECT id, balance, delta, created_at, email FROM users WHERE users.id = $1",
         user_id
     )
-    .fetch_optional(&conn)
+    .fetch_optional(conn)
     .await?
     else {
         // That should not happen, as we have a valid session with a user_id.
         return Err(self::Error::UserNotFound);
     };
 
-    return Ok(Json(user));
+    return Ok(user);
+}
+
+#[axum::debug_handler]
+pub async fn get_auth_session(
+    State(AppState {
+        database: DatabaseConnection(conn),
+        ..
+    }): State<AppState>,
+    cookies: Cookies,
+) -> self::Result<Json<ClientUser>> {
+    return Ok(Json(self::get_server_side_session(&conn, &cookies).await?));
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct ClientRegisterPayload {
+pub struct ClientAuthenticationCredentials {
     email: String,
     password: String,
 }
@@ -162,16 +175,47 @@ mod password_policy {
     }
 }
 
-#[axum::debug_handler]
+/// NOTE: I am not sure if I want to isolate such logic into separate functions as it's not very flexible.
+pub async fn create_database_session(
+    // executor: impl Executor<'_, sqlx::Pool<sqlx::Postgres>>,
+    executor: impl Executor<'_, Database = sqlx::Postgres>,
+    user_id: i32,
+) -> self::Result<DatabaseSession> {
+    // let e = executor.fetch_one(query);
+    Ok(sqlx::query_as!(
+        DatabaseSession,
+        "INSERT INTO sessions (user_id, created_at, expires_at)
+        VALUES ($1, DEFAULT, DEFAULT) RETURNING *",
+        user_id
+    )
+    .fetch_one(executor)
+    .await?)
+}
+
+// I want it to take the ssid as a string or uuid, if string then that should be convertible to uuid,
+fn create_ssid_cookie<T: TryInto<Uuid>>(ssid: T) -> self::Result<Cookie<'static>>
+where
+    <T as std::convert::TryInto<sqlx::types::Uuid>>::Error: std::fmt::Debug,
+{
+    // fn create_ssid_cookie(ssid: impl TryInto<Uuid>) -> self::Result<Cookie<'static>> {
+    let s = ssid.try_into().unwrap();
+
+    Ok(Cookie::build((cookies::SSID, s.to_string()))
+        .http_only(true)
+        .path("/")
+        .max_age(time::Duration::days(7))
+        .into())
+}
+
+// #[axum::debug_handler]
 pub async fn register_user(
     State(AppState {
         database: DatabaseConnection(conn),
         ..
     }): State<AppState>,
     cookies: Cookies,
-    mut headers: HeaderMap,
-    Json(payload): Json<ClientRegisterPayload>,
-) -> self::Result<Json<ClientUser>> {
+    Json(payload): Json<ClientAuthenticationCredentials>,
+) -> self::Result<impl IntoResponse> {
     // To register a user we need to:
     // 1. Take the email and password from the user, send it over HTTP, ideally that would be HTTPS
     // but we are not doing that.
@@ -197,15 +241,22 @@ pub async fn register_user(
     // as there could be multiple sessions for a single user.
     // 7. Finally we would return a success response to the client.
 
-    // TODO: The user can register multiple times, even if already logged in, decide what to do about that.
-    // We could redirect to the root page.
+    // If someone is authenticated, we do not want them to register again,
+    // and would be considered an error.
 
-    let ClientRegisterPayload { email, password } = payload;
+    // That is kind off weird, but the Err is returned when there is no session, which is what we want.
+    // That could technically be more idiomatic if that would be an Option, but then we would not be
+    // able propagate the errors easily, so leave that be.
+    let Err(_) = self::get_server_side_session(&conn, &cookies).await else {
+        return Err(self::Error::AlreadyAuthenticated);
+    };
+
+    let ClientAuthenticationCredentials { email, password } = payload;
 
     // We are not doing email validation, just rely on the client side validation.
 
     if !password_policy::validate_password_policy(&password) {
-        return Err(self::Error::WeakPassword(password));
+        return Err(self::Error::PasswordRequirementsNotMet(password));
     }
 
     let password = password.as_bytes();
@@ -215,19 +266,15 @@ pub async fn register_user(
 
     // NOTE: As per documentation, that may block the OS, maybe that should be put inside the tokio::task::spawn_blocking
     let salt = SaltString::generate(&mut OsRng);
-
     let argon2 = Argon2::default();
 
     let password_hash = argon2.hash_password(password, &salt)?.to_string();
-    let parsed_hash = PasswordHash::new(&password_hash)?;
 
-    assert!(
-        Argon2::default()
-            .verify_password(password, &parsed_hash)
-            .is_ok()
-    );
+    // NOTE: Not sure if we need that.
+    // let parsed_hash: PasswordHash<'_> = PasswordHash::new(&password_hash)?;
+    // Argon2::default().verify_password(password, &parsed_hash)?;
 
-    let mut tx = conn.begin().await?;
+    let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = conn.begin().await?;
 
     // Check if email is already taken.
     let is_email_taken = sqlx::query!(
@@ -250,52 +297,132 @@ pub async fn register_user(
 
     let user = sqlx::query_as!(
         DatabaseUser,
-        "INSERT INTO users (email, password_hash, password_salt, account_id) 
-        VALUES ($1, $2, $3, $4) RETURNING *",
+        "INSERT INTO users (email, password_hash, account_id) 
+        VALUES ($1, $2, $3) RETURNING *",
         email,
         password_hash,
-        salt.as_str(),
         account.id
     )
     .map(ClientUser::from)
     .fetch_one(tx.as_mut())
     .await?;
 
-    let session = sqlx::query!(
-        "INSERT INTO sessions (user_id, created_at, expires_at) 
-        VALUES ($1, DEFAULT, DEFAULT) RETURNING id",
-        user.id
-    )
-    .fetch_one(tx.as_mut())
-    .await?;
+    let DatabaseSession { id: ssid, .. } =
+        self::create_database_session(tx.as_mut(), user.id).await?;
 
-    // Save the user-session into the junction table.
-    // sqlx::query!(
-    //     "INSERT INTO user_sessions (user_id, session_id) VALUES ($1, $2)",
-    //     user.id,
-    //     session.id
-    // )
-    // .execute(&conn)
-    // .await?;
+    let cookie = self::create_ssid_cookie(ssid)?;
+    cookies.add(cookie);
 
     tx.commit().await?;
 
-    let cookie = Cookie::build(("SSID", session.id.to_string()))
-        .http_only(true)
-        .path("/")
-        .max_age(time::Duration::days(7));
-
-    cookies.add(cookie.into());
-
-    return Ok(Json(user));
+    return Ok(axum::response::IntoResponse::into_response(Json(user)));
 }
 
 #[axum::debug_handler]
-pub async fn login_user() {
-    unimplemented!()
+pub async fn login_user(
+    cookies: Cookies,
+    State(AppState {
+        database: DatabaseConnection(conn),
+        ..
+    }): State<AppState>,
+    Json(payload): Json<ClientAuthenticationCredentials>,
+) -> self::Result<Json<ClientUser>> {
+    // Logging the user we need to do:
+    // 1. Check if the user is already authenticated, if so, return an error.
+    // 2. Take the email and password from the user, send it over HTTP, ideally that would be HTTPS
+    // 3. We would have to take that email and query the database for the user, I have heard that is not ideal
+    // as it exposes timing attacks, but I don't see the way we would hash the password without the salt.
+    // We have to take the email, match the user, take the salt and password, hash it and compare the hashes against the one in database.
+    // 4. Then we would save the ssid cookie and create a session for that user in the database.
+
+    // We cannot just propagate the error here, as they are not relevant to that endpoint.
+    // We could log it though.
+    let Err(_) = self::get_server_side_session(&conn, &cookies).await else {
+        return Err(self::Error::AlreadyAuthenticated);
+    };
+
+    let ClientAuthenticationCredentials { email, password } = payload;
+
+    let mut tx = conn.begin().await?;
+
+    let Some(user) = sqlx::query_as!(DatabaseUser, "SELECT * FROM users WHERE email = $1", email)
+        .fetch_optional(tx.as_mut())
+        .await?
+    else {
+        return Err(self::Error::InvalidCredentials { source: None });
+    };
+
+    Argon2::default()
+        .verify_password(
+            password.as_bytes(),
+            &PasswordHash::new(&user.password_hash)?,
+        )
+        .map_err(|e| self::Error::InvalidCredentials {
+            source: Some(Arc::new(anyhow::Error::new(e))),
+        })?;
+
+    let DatabaseSession { id: ssid, .. } =
+        self::create_database_session(tx.as_mut(), user.id).await?;
+
+    let cookie = self::create_ssid_cookie(ssid)?;
+    cookies.add(cookie);
+
+    return Ok(Json(ClientUser::from(user)));
 }
 
 #[axum::debug_handler]
-pub async fn logout_user() {
-    unimplemented!()
+pub async fn logout_user(
+    State(AppState {
+        database: DatabaseConnection(conn),
+        ..
+    }): State<AppState>,
+    cookies: Cookies,
+) -> self::Result<Json<ApiStatusResponse>> {
+    // 1. Check if there is a user, there is a session cookie, that is valid and exists in db.
+    // 2. Remove the cookie server-side sending appropriate Set-Cookie header.
+    // 3. Remove the session from the database.
+
+    // NOTE: Maybe that should be a transaction.
+
+    self::get_server_side_session(&conn, &cookies)
+        .await
+        .map_err(|e| self::Error::ClientError {
+            source: Some(Arc::new(e.into())),
+        })?;
+
+    match cookies.get(cookies::SSID).map(|c| c.value().to_owned()) {
+        Some(ssid) => {
+            let ssid = Uuid::parse_str(&ssid).map_err(|e| self::Error::ClientError {
+                source: Some(Arc::new(e.into())),
+            })?;
+
+            // Delete the session from the database.
+            sqlx::query!(
+                "DELETE FROM sessions WHERE id = $1::uuid",
+                // That should not happen
+                ssid
+            )
+            .execute(&conn)
+            .await?;
+
+            // To properly remove the cookie it has to be of the same name, path and domain.
+            let cookie = Cookie::build((cookies::SSID, "")).http_only(true).path("/");
+            cookies.remove(cookie.into());
+        }
+        None => {
+            // NOTE: This should not happen as call for server side session already validates that.
+            return Err(self::Error::ClientError {
+                source: Some(Arc::new(anyhow::anyhow!(self::Error::MissingSessionCookie))),
+            });
+        }
+    };
+
+    return Ok(Json(ApiStatusResponse { status: true }));
+}
+
+#[cfg(test)]
+mod tests {
+    // use super::*;
+
+    // TODO: Write tests for the auth controller, I would probably use some kind of http client like reqwest.
 }

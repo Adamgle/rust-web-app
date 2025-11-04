@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Stock } from "../../types/types";
+import { Stock } from "../../api/types/schema";
 
 export function StockEntry({ stock }: { stock: Stock }) {
   return (

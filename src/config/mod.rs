@@ -40,6 +40,9 @@ pub enum Env {
     ServerUrl,
     ServerPort,
     ClientUrl,
+    // TODO: Maybe we need to remove the public envs from consideration here, as those are only used in the frontend
+    // because we are doing the same twice.
+    NextPublicClientUrl,
     ClientPort,
     DbAdminPostgresPassword,
     DbPostgresAdambPassword,
@@ -273,8 +276,8 @@ mod tests {
 
         let file_envs = self::create_temp_env_file(vars.as_slice())?;
 
-        assert_eq!(vars.len(), file_envs.len());    
-        
+        assert_eq!(vars.len(), file_envs.len());
+
         for var in file_envs.iter() {
             assert_eq!(std::env::var(var).unwrap_or_default(), "value");
         }
