@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import useSWR, { SWRConfiguration, SWRHook } from "swr";
+import useSWR, { SWRConfiguration } from "swr";
 import { fetcher } from "../../utils/fetcher";
 
 // It would be ideal if we would have some kind of mapping between the server API response
@@ -74,8 +74,5 @@ export function useFetch<Data, Error = any>(
     [endpoint, options],
   );
 
-  return {
-    ...useSWR<Data, Error>(endpoint, callback, config),
-    // useSWR: { key: endpoint },
-  };
+  return useSWR<Data, Error>(endpoint, callback, config);
 }

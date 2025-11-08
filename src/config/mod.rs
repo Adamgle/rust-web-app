@@ -8,7 +8,7 @@ pub(in crate::config) type Result<T> = std::result::Result<T, self::Error>;
 
 pub struct Config;
 
-/// ## This code should not happen. Written to practice unit testing.
+/// # This code should not happen. Written to practice unit testing.
 ///
 /// Defines all the environment variables used in the application.
 /// Throw runtime errors if there is any mismatch between the envs defined in the `.env` file
@@ -97,7 +97,7 @@ impl Env {
         // NOTE: Maybe that approach would be better, read from some repo on github.
         // This returns an error if the `.env` file doesn't exist, but that's not what we want
         // since we're not going to use a `.env` file if we deploy this application
-        dotenvy::from_path(env_path).map_err(EnvError::from)?;
+        dotenvy::from_filename_override(env_path).map_err(EnvError::from)?;
 
         let file_envs = dotenvy::dotenv_iter().map_err(EnvError::from)?;
         let mut seen = HashSet::new();
@@ -107,7 +107,7 @@ impl Env {
 
             // Since the key is in wrong format, surely there is not variant for it in the enum.
             // and we want to inform about that before we inform about the missing variant in the enum.
-            if !key.chars().all(|r| r.is_uppercase() || r == '_') {
+            if !key.chars().all(|r: char| r.is_uppercase() || r == '_') {
                 return Err(EnvError::WrongFormat(key).into());
             }
 
@@ -196,18 +196,40 @@ mod tests {
     // On assertion failure the Drop impl will restore the current-working-directory
     impl Drop for TempCwd {
         fn drop(&mut self) {
-            std::env::set_current_dir(&self.old).unwrap();
+            let temp_cwd = std::env::current_dir().expect("Failed to get current dir in Drop impl");
+
+            std::env::set_current_dir(self.old.clone())
+                .expect("Failed to restore cwd calling Drop on TempCwd");
+
+            let current =
+                std::env::current_dir().expect("Failed to get current dir after restoring");
+
+            assert_ne!(temp_cwd, current);
+
+            // I find out that I have to reload every time when restoring the cwd, since other tests may use the envs
+            // in the process. I thought that when I change the cwd back, the envs would be still there, but apparently not.
+            Env::load_envs().expect("Could not load after restoring cwd in Drop impl");
+
+            for env in crate::config::Env::get_enum_envs().unwrap().iter() {
+                let current = std::env::var(env);
+                assert_ne!(
+                    current,
+                    Ok("value".to_string()),
+                    "Env {} is not set correctly after restoring cwd",
+                    env
+                );
+            }
         }
     }
 
     /// Creates a temporary `.env` file in a temporary directory with the provided envs.
     /// Fills the envs with dummy values. Return the set of envs that were written to the file.
     ///
-    /// Value of the envs are set to "value"
+    /// Value of the envs are set to `value`
     ///
     /// NOTE: Every test that calls this function has to be marked with `#[serial_test::serial]`
     /// since it changes the current-working-directory that is a global state and tests cannot be run in parallel.
-    fn create_temp_env_file(vars: &[&str]) -> anyhow::Result<HashSet<String>> {
+    fn create_temp_env_file(vars: &[&str]) -> anyhow::Result<(HashSet<String>, TempCwd)> {
         let tempdir = tempfile::tempdir()?;
         let path = tempdir.path().join(Env::ENV_PATH);
 
@@ -220,7 +242,7 @@ mod tests {
             .context("Failed to open temp env file")?;
 
         // Store previous cwd and restore it after the test.
-        // If not hold into the variable, the Drop will be called immediately and the cwd will be restored before
+        // If into bound to the variable, the Drop will be called immediately and the cwd will be restored before the test completes.
         let _guard = TempCwd::push(tempdir.path())?;
 
         // Write every single var to the env file, we do not care about the values.
@@ -242,7 +264,13 @@ mod tests {
         // The idea is that when cwd changes, that would load the .env from the file that was created in that dummy cwd.
         let file_envs = Env::get_file_envs()?;
 
-        Ok(file_envs)
+        for var in vars.iter() {
+            // Assert that the file system has loaded the envs;
+            assert!(std::env::var(var) == Ok("value".to_string()))
+        }
+
+        // Hold the guard to restore the cwd later.
+        Ok((file_envs, _guard))
     }
 
     #[test]
@@ -267,26 +295,25 @@ mod tests {
         Ok(())
     }
 
+    // We need serial_test::serial for that to now interfere with other tests, or more like, for other tests to not interfere
+    // but actually that test can also interfere.
     #[test]
     #[serial_test::serial]
-    /// We need serial_test::serial for that to now interfere with other tests, or more like, for other tests to not interfere
-    /// but actually that test can also interfere.
     fn test_envs_loaded_from_file() -> anyhow::Result<()> {
         let vars = vec!["SERVER_URL", "DATABASE_URL", "CLIENT_URL"];
 
-        let file_envs = self::create_temp_env_file(vars.as_slice())?;
+        let (file_envs, _guard) = self::create_temp_env_file(vars.as_slice())?;
 
         assert_eq!(vars.len(), file_envs.len());
 
         for var in file_envs.iter() {
+            // assert_eq!(dotenvy::var(var).unwrap_or_default(), "value");
             assert_eq!(std::env::var(var).unwrap_or_default(), "value");
         }
 
         Ok(())
     }
 
-    #[test]
-    #[serial_test::serial]
     /// The tests by default run in parallel, on multiple threads. Since we are modifying the current-working-directory
     /// which is a global state, it would cause race conditions.
     ///
@@ -301,10 +328,12 @@ mod tests {
     ///
     /// The other way around to make it work would be to run the tests in a single thread:
     /// `cargo test -- --test-threads=1`
+    #[test]
+    #[serial_test::serial]
     fn test_env_in_file_but_not_in_enum() -> anyhow::Result<()> {
         let vars = vec!["SERVER_URL", "DATABASE_URL"];
 
-        let file_envs = self::create_temp_env_file(vars.as_slice())?;
+        let (file_envs, _guard) = self::create_temp_env_file(vars.as_slice())?;
 
         // There is not way to emulate the enum variants at runtime, so we just create a HashSet
         // The variants from enum are from iterating the variants using the strum_macros::EnumIter
@@ -325,8 +354,6 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    #[serial_test::serial]
     /// The tests by default run in parallel, on multiple threads. Since we are modifying the current-working-directory
     /// which is a global state, it would cause race conditions.
     ///
@@ -340,10 +367,12 @@ mod tests {
     /// Otherwise sometimes the test would not pass, even if it is correct.
     /// The other way around to make it work would be to run the tests in a single thread:
     /// `cargo test -- --test-threads=1`
+    #[test]
+    #[serial_test::serial]
     fn test_env_in_enum_but_not_in_file() -> anyhow::Result<()> {
         let vars = vec!["SERVER_URL", "DATABASE_URL"];
 
-        let file_envs = self::create_temp_env_file(vars.as_slice())?;
+        let (file_envs, _guard) = self::create_temp_env_file(vars.as_slice())?;
 
         // Write one more to enum, to simulate the missing env in the file.
         let enum_envs = HashSet::<String>::from_iter(

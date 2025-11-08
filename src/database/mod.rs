@@ -21,6 +21,10 @@ pub struct DatabaseConnection(pub sqlx::Pool<sqlx::Postgres>);
 impl DatabaseConnection {
     pub async fn new() -> self::Result<Self> {
         let conn = Self::connect().await?;
+
+        // Run migrations, setup the tables.
+        sqlx::migrate!("./migrations").run(&conn).await?;
+
         Ok(Self(conn))
     }
 

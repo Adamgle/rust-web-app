@@ -28,7 +28,7 @@ const handleRegister: LoginPageProps["onSubmit"] = async (e) => {
     // That can only return ApiFetchError so the catch error is probably of that type.
     const data = await fetcher<SessionUser>("/auth/register", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email: email.toString().toLowerCase(), password }),
     });
 
     return data;

@@ -5,7 +5,6 @@ use crate::error::ErrorResponse;
 
 use crate::error::ErrorExt;
 use axum::response::IntoResponse;
-use sqlx::types::uuid;
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum Error {
@@ -15,11 +14,10 @@ pub enum Error {
     MissingSessionCookie,
     #[error("Missing session for ssid cookie in database")]
     MissingSessionInDatabase,
-    #[error("Invalid ssid cookie: {ssid}")]
-    InvalidSessionCookie {
-        ssid: String,
-        #[source]
-        source: uuid::Error,
+    #[error("Invalid ssid cookie")]
+    InvalidSessionCookieWrongUuidFormat {
+        ssid: Option<String>,
+        source: Arc<anyhow::Error>,
     },
     #[error("Session expired at: {0}")]
     SessionExpired(String),
@@ -40,13 +38,15 @@ pub enum Error {
         #[source]
         source: Option<Arc<anyhow::Error>>,
     },
-    // That would be general purpose client error when we do not want to send any specific reason
+    // That would be general purpose, catch all variant for client errors when we do not want to send any specific reason
     // for the failure, but do want to save the source of the error in variant for logging purposes.
     #[error("Internal Server Error")]
     ClientError {
         #[source]
         source: Option<Arc<anyhow::Error>>,
     },
+    #[error("Internal Server Error")]
+    Other(#[from] Arc<anyhow::Error>),
 }
 
 impl IntoResponse for Error {
@@ -67,7 +67,7 @@ impl IntoResponse for Error {
                 status: axum::http::StatusCode::UNAUTHORIZED,
                 message,
             },
-            Error::InvalidSessionCookie { .. } => ErrorResponse {
+            Error::InvalidSessionCookieWrongUuidFormat { .. } => ErrorResponse {
                 status: axum::http::StatusCode::UNAUTHORIZED,
                 message,
             },
@@ -102,7 +102,7 @@ impl IntoResponse for Error {
                 status: axum::http::StatusCode::BAD_REQUEST,
                 message,
             },
-            Error::ClientError { .. } => ErrorResponse {
+            Error::ClientError { .. } | Error::Other(_) => ErrorResponse {
                 status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 message,
             },

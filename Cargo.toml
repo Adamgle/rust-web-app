@@ -23,7 +23,8 @@ sqlx = { version = "0.8.6", features = [
     "macros",
     "derive",
     'chrono',
-    "uuid"
+    "uuid",
+    'migrate'
     # 'time',
     # "json" => Add support for JSON and JSONB (in postgres) using the serde_json crate.
     # "migrate",
@@ -50,4 +51,5 @@ tracing-subscriber = "0.3.20"
 # path = "src/bin/server.rs"
 
 [dev-dependencies]
+reqwest = "0.12.24"
 tempfile = "3.23.0"

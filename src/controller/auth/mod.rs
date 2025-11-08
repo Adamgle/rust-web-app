@@ -23,7 +23,7 @@ use crate::{
 };
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{FromRequest, Request, State, rejection::JsonRejection},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -49,11 +49,13 @@ pub async fn get_server_side_session(
     let cookie_ssid = cookie_ssid.value();
 
     // TODO: Test the error, how it behaves when the UUID is invalid.
-    let cookie_ssid =
-        Uuid::parse_str(cookie_ssid).map_err(|e| self::Error::InvalidSessionCookie {
-            ssid: cookie_ssid.to_string(),
-            source: e,
-        })?;
+    // let cookie_ssid: Uuid = cookie_ssid.try_into()
+    let cookie_ssid: Uuid = Uuid::parse_str(cookie_ssid).map_err(|e| {
+        self::Error::InvalidSessionCookieWrongUuidFormat {
+            ssid: Some(cookie_ssid.to_string()),
+            source: Arc::new(anyhow::Error::new(e)),
+        }
+    })?;
 
     // Check if the sessions exists for the ssid cookie.
     // NOTE: Not sure why I have to cast the $1 to uuid, but without it it fails.
@@ -70,11 +72,13 @@ pub async fn get_server_side_session(
     };
 
     if expires_at < chrono::Utc::now().naive_utc() {
+        // Delete the expired session
+        sqlx::query!("DELETE FROM sessions WHERE id = $1::uuid", cookie_ssid)
+            .execute(conn)
+            .await?;
+
         return Err(self::Error::SessionExpired(expires_at.to_string()));
     }
-
-    // TODO: Those columns of that table are definitely not extensive, we need to think about what we will
-    // actually need when returning user information to the client.
 
     let Some(user) = sqlx::query_as!(
         ClientUser,
@@ -102,7 +106,7 @@ pub async fn get_auth_session(
     return Ok(Json(self::get_server_side_session(&conn, &cookies).await?));
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct ClientAuthenticationCredentials {
     email: String,
     password: String,
@@ -125,6 +129,7 @@ mod password_policy {
     pub fn validate_password_policy(password: &str) -> bool {
         // NOTE: That is not the length, that is the size in bytes as this is how the len function works, it may behave unexpectedly with the grapheme rich symbols,
         // leave that be.
+
         let size = password.len();
 
         if !(MIN_LENGTH..MAX_LENGTH).contains(&size) {
@@ -196,15 +201,48 @@ pub async fn create_database_session(
 fn create_ssid_cookie<T: TryInto<Uuid>>(ssid: T) -> self::Result<Cookie<'static>>
 where
     <T as std::convert::TryInto<sqlx::types::Uuid>>::Error: std::fmt::Debug,
+    T::Error: std::error::Error + Send + Sync + 'static,
 {
-    // fn create_ssid_cookie(ssid: impl TryInto<Uuid>) -> self::Result<Cookie<'static>> {
-    let s = ssid.try_into().unwrap();
+    let s = ssid
+        .try_into()
+        .map_err(|e| self::Error::InvalidSessionCookieWrongUuidFormat {
+            // Cannot get the ssid string here unfortunately.
+            ssid: None,
+            source: Arc::new(anyhow::Error::new(e)),
+        })?;
 
     Ok(Cookie::build((cookies::SSID, s.to_string()))
         .http_only(true)
         .path("/")
+        .same_site(tower_cookies::cookie::SameSite::Strict)
         .max_age(time::Duration::days(7))
         .into())
+}
+
+/// A custom extractor to normalize the email to lowercase, obvious overkill.
+/// I think I could achieve that with deserialize attributes to serde, but not sure.
+pub struct ExtractClientAuthenticationCredentials<T>(pub T);
+
+impl<S> FromRequest<S> for ExtractClientAuthenticationCredentials<ClientAuthenticationCredentials>
+where
+    axum::Json<ClientAuthenticationCredentials>: FromRequest<S, Rejection = JsonRejection>,
+    S: Send + Sync,
+{
+    type Rejection = JsonRejection;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> std::result::Result<Self, Self::Rejection> {
+        match axum::Json::<ClientAuthenticationCredentials>::from_request(req, state).await {
+            Ok(mut value) => {
+                value.email = value.email.to_lowercase();
+
+                Ok(Self(value.0))
+            }
+            Err(rejection) => Err(rejection),
+        }
+    }
 }
 
 // #[axum::debug_handler]
@@ -214,7 +252,9 @@ pub async fn register_user(
         ..
     }): State<AppState>,
     cookies: Cookies,
-    Json(payload): Json<ClientAuthenticationCredentials>,
+    ExtractClientAuthenticationCredentials(credentials): ExtractClientAuthenticationCredentials<
+        ClientAuthenticationCredentials,
+    >,
 ) -> self::Result<impl IntoResponse> {
     // To register a user we need to:
     // 1. Take the email and password from the user, send it over HTTP, ideally that would be HTTPS
@@ -251,15 +291,13 @@ pub async fn register_user(
         return Err(self::Error::AlreadyAuthenticated);
     };
 
-    let ClientAuthenticationCredentials { email, password } = payload;
+    let ClientAuthenticationCredentials { email, password } = credentials;
 
     // We are not doing email validation, just rely on the client side validation.
 
     if !password_policy::validate_password_policy(&password) {
         return Err(self::Error::PasswordRequirementsNotMet(password));
     }
-
-    let password = password.as_bytes();
 
     // We are storing the password as a hash using Argon2 algorithm with salt.
     // We store the salt to verify the password later during login.
@@ -268,7 +306,9 @@ pub async fn register_user(
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
 
-    let password_hash = argon2.hash_password(password, &salt)?.to_string();
+    let password_hash = argon2
+        .hash_password(password.as_bytes(), &salt)?
+        .to_string();
 
     // NOTE: Not sure if we need that.
     // let parsed_hash: PasswordHash<'_> = PasswordHash::new(&password_hash)?;
@@ -325,7 +365,9 @@ pub async fn login_user(
         database: DatabaseConnection(conn),
         ..
     }): State<AppState>,
-    Json(payload): Json<ClientAuthenticationCredentials>,
+    ExtractClientAuthenticationCredentials(credentials): ExtractClientAuthenticationCredentials<
+        ClientAuthenticationCredentials,
+    >,
 ) -> self::Result<Json<ClientUser>> {
     // Logging the user we need to do:
     // 1. Check if the user is already authenticated, if so, return an error.
@@ -341,7 +383,7 @@ pub async fn login_user(
         return Err(self::Error::AlreadyAuthenticated);
     };
 
-    let ClientAuthenticationCredentials { email, password } = payload;
+    let ClientAuthenticationCredentials { email, password } = credentials;
 
     let mut tx = conn.begin().await?;
 
@@ -366,6 +408,8 @@ pub async fn login_user(
 
     let cookie = self::create_ssid_cookie(ssid)?;
     cookies.add(cookie);
+
+    tx.commit().await?;
 
     return Ok(Json(ClientUser::from(user)));
 }
@@ -422,7 +466,38 @@ pub async fn logout_user(
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
 
-    // TODO: Write tests for the auth controller, I would probably use some kind of http client like reqwest.
+    // // TODO: Write tests for the auth controller, I would probably use some kind of http client like reqwest.
+    // #[tokio::test]
+    // pub async fn test_samesite_cookie() -> anyhow::Result<()> {
+    //     let client = reqwest::Client::new();
+    //     let res = client
+    //         .post(std::env::var("CLIENT_URL").unwrap())
+    //         .body(serde_json::json!("{message: 'test'}").to_string())
+    //         .send()
+    //         .await?;
+
+    //     Ok(())
+    // }
+
+    // NOTE: This test makes config::tests::test_envs_loaded_from_file not pass, which is an absolute cinema, as it
+    // has nothing to do with that test. When isolated, they both pass.
+
+    #[sqlx::test]
+    async fn test_basic(pool: sqlx::Pool<sqlx::Postgres>) -> sqlx::Result<()> {
+        sqlx::query!("SELECT * FROM _sqlx_migrations")
+            .fetch_one(&pool)
+            .await?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_cookie_with_invalid_ssid_value() {
+        let result = create_ssid_cookie("invalid-uuid-string");
+
+        println!("Result: {:?}", result);
+        assert!(result.is_err());
+    }
 }

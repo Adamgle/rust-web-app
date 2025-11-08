@@ -27,7 +27,7 @@ async function redirectAuthenticatedUser(
     );
   }
 
-  console.log("Checking for authenticated user session for redirect...");
+  console.log("Checking for authenticated user session to redirect...");
 
   const jar = await cookies();
 
@@ -41,7 +41,8 @@ async function redirectAuthenticatedUser(
       return NextResponse.redirect(to);
     })
     // On error, do nothing, we could log that to database thought for analysis.
-    .catch((_) => null);
+    // Error hear means the SSID is invalid or there is no ssid, so user is not logged in.
+    .catch(() => null);
 
   return response || NextResponse.next();
 }
