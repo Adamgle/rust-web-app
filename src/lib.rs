@@ -13,39 +13,62 @@ pub mod prelude;
 
 use axum::{
     Router,
-    extract::MatchedPath,
+    extract::{FromRef, MatchedPath},
     http::Request,
     middleware::{Next, from_fn},
 };
 
 use crate::{config::Config, database::DatabaseConnection};
 
-#[derive(Clone)]
+#[derive(Clone, FromRef)]
 pub struct AppState {
-    database: DatabaseConnection,
+    pub database: DatabaseConnection,
     // caches: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>,
 }
 
+impl AppState {
+    pub fn new(database: impl Into<DatabaseConnection>) -> Self {
+        Self {
+            database: database.into(),
+        }
+    }
+
+    /// Create a default AppState by initializing the database connection.
+    /// This is useful for production use where we want to create the state
+    pub async fn default() -> crate::Result<Self> {
+        Ok(Self {
+            database: DatabaseConnection::new().await?,
+        })
+    }
+}
+
 pub async fn run(_config: config::Config) -> crate::Result<()> {
-    let database = database::DatabaseConnection::new().await?;
     let listener = tokio::net::TcpListener::bind(Config::APP_SOCKET_ADDR).await?;
 
     tracing::debug!("Listening on {}", Config::APP_SOCKET_ADDR);
 
-    axum::serve(listener, app(database)).await?;
+    // None, because it defaults to creating database already in the app function, it is easier this way to test using `app`.
+    let state = AppState::default().await?;
+
+    let app = app(state).await?;
+
+    axum::serve(listener, app).await?;
 
     Ok(())
 }
 
-fn app_router() -> Router<AppState> {
-    Router::<AppState>::new()
+pub async fn routes<S: Clone + Send + Sync + 'static>(state: AppState) -> self::Result<Router<S>> {
+    let router = Router::new()
         .merge(controller::stocks::router())
         .merge(controller::auth::router())
+        .with_state(state);
+
+    Ok(router)
 }
 
-pub fn app(database: DatabaseConnection) -> axum::routing::IntoMakeService<Router> {
-    Router::<AppState>::new()
-        .nest("/api/v1", app_router())
+pub async fn app(state: AppState) -> self::Result<Router> {
+    Ok(Router::new()
+        .nest("/api/v1", routes(state).await?)
         .layer(
             tower_http::trace::TraceLayer::new_for_http()
                 .make_span_with(|req: &Request<axum::body::Body>| {
@@ -59,9 +82,7 @@ pub fn app(database: DatabaseConnection) -> axum::routing::IntoMakeService<Route
                 .on_failure(()),
         )
         .layer(from_fn(log_app_errors))
-        .layer(tower_cookies::CookieManagerLayer::new())
-        .with_state(AppState { database })
-        .into_make_service()
+        .layer(tower_cookies::CookieManagerLayer::new()))
 }
 
 // Our middleware is responsible for logging error details internally

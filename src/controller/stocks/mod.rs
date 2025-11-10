@@ -3,15 +3,18 @@ pub use error::Error;
 use sqlx::types::chrono;
 use tracing::info;
 
-use crate::{AppState, controller::error::GenericControllerError, database::DatabaseConnection};
+use crate::{controller::error::GenericControllerError, database::DatabaseConnection};
 use axum::{
-    extract::{Json, Path, State},
+    extract::{FromRef, Json, Path, State},
     response::IntoResponse,
 };
 
 pub(in crate::controller::stocks) type Result<T> = std::result::Result<T, self::Error>;
 
-pub fn router() -> axum::Router<AppState> {
+pub fn router<S: Clone + Send + Sync + 'static>() -> axum::Router<S>
+where
+    DatabaseConnection: FromRef<S>,
+{
     axum::Router::new()
         .route("/stocks", axum::routing::get(get_stocks))
         .route("/stocks/{id}", axum::routing::get(get_stock))
@@ -62,6 +65,9 @@ pub async fn get_stocks(
 pub async fn get_stock(
     // id: Result<FalliblePath>,
     Path(id): Path<String>,
+    // State(AppState {
+    //     database: DatabaseConnection(conn),
+    // }): State<AppState>,
     State(conn): State<DatabaseConnection>,
 ) -> self::Result<impl IntoResponse> {
     let id = id

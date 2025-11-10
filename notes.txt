@@ -327,3 +327,4 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
 Writing tests for controller::auth
      -> fn create_ssid_cookie<T: TryInto<Uuid>>(ssid: T) -> self::Result<Cookie<'static>>
           Test for invalid ssid, valid ssid, 
+     -> 

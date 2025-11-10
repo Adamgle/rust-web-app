@@ -14,7 +14,6 @@ use sqlx::{Executor, Pool, types::Uuid};
 use tower_cookies::{Cookie, Cookies};
 
 use crate::{
-    AppState,
     controller::{cookies, types::ApiStatusResponse},
     database::{
         DatabaseConnection,
@@ -23,14 +22,17 @@ use crate::{
 };
 use axum::{
     Json, Router,
-    extract::{FromRequest, Request, State, rejection::JsonRejection},
+    extract::{FromRef, FromRequest, State, rejection::JsonRejection},
     response::IntoResponse,
     routing::{get, post},
 };
 
 pub(in crate::controller::auth) type Result<T> = std::result::Result<T, self::Error>;
 
-pub fn router() -> Router<AppState> {
+pub fn router<S: Clone + Send + Sync + 'static>() -> axum::Router<S>
+where
+    DatabaseConnection: FromRef<S>,
+{
     Router::new()
         .route("/auth/session", get(get_auth_session))
         .route("/auth/register", post(register_user))
@@ -97,19 +99,16 @@ pub async fn get_server_side_session(
 
 #[axum::debug_handler]
 pub async fn get_auth_session(
-    State(AppState {
-        database: DatabaseConnection(conn),
-        ..
-    }): State<AppState>,
+    State(DatabaseConnection(conn)): State<DatabaseConnection>,
     cookies: Cookies,
 ) -> self::Result<Json<ClientUser>> {
     return Ok(Json(self::get_server_side_session(&conn, &cookies).await?));
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ClientAuthenticationCredentials {
-    email: String,
-    password: String,
+    pub email: String,
+    pub password: String,
 }
 
 // We are doing the module trick to isolate the const flags, which, bear with me, are useless.
@@ -182,11 +181,9 @@ mod password_policy {
 
 /// NOTE: I am not sure if I want to isolate such logic into separate functions as it's not very flexible.
 pub async fn create_database_session(
-    // executor: impl Executor<'_, sqlx::Pool<sqlx::Postgres>>,
     executor: impl Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
 ) -> self::Result<DatabaseSession> {
-    // let e = executor.fetch_one(query);
     Ok(sqlx::query_as!(
         DatabaseSession,
         "INSERT INTO sessions (user_id, created_at, expires_at)
@@ -245,12 +242,20 @@ where
     }
 }
 
-// #[axum::debug_handler]
+fn hash_password(password: &str) -> self::Result<String> {
+    // NOTE: As per documentation OsRng use may block the OS, maybe that should be put inside the tokio::task::spawn_blocking
+
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default()
+        .hash_password(password.as_bytes(), &salt)?
+        .to_string();
+
+    Ok(hash)
+}
+
+#[axum::debug_handler]
 pub async fn register_user(
-    State(AppState {
-        database: DatabaseConnection(conn),
-        ..
-    }): State<AppState>,
+    State(DatabaseConnection(conn)): State<DatabaseConnection>,
     cookies: Cookies,
     ExtractClientAuthenticationCredentials(credentials): ExtractClientAuthenticationCredentials<
         ClientAuthenticationCredentials,
@@ -281,13 +286,11 @@ pub async fn register_user(
     // as there could be multiple sessions for a single user.
     // 7. Finally we would return a success response to the client.
 
-    // If someone is authenticated, we do not want them to register again,
-    // and would be considered an error.
-
     // That is kind off weird, but the Err is returned when there is no session, which is what we want.
     // That could technically be more idiomatic if that would be an Option, but then we would not be
     // able propagate the errors easily, so leave that be.
-    let Err(_) = self::get_server_side_session(&conn, &cookies).await else {
+    if self::get_server_side_session(&conn, &cookies).await.is_ok() {
+        // Frontend edge runtime would redirect the user to homepage if already authenticated.
         return Err(self::Error::AlreadyAuthenticated);
     };
 
@@ -298,21 +301,6 @@ pub async fn register_user(
     if !password_policy::validate_password_policy(&password) {
         return Err(self::Error::PasswordRequirementsNotMet(password));
     }
-
-    // We are storing the password as a hash using Argon2 algorithm with salt.
-    // We store the salt to verify the password later during login.
-
-    // NOTE: As per documentation, that may block the OS, maybe that should be put inside the tokio::task::spawn_blocking
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-
-    let password_hash = argon2
-        .hash_password(password.as_bytes(), &salt)?
-        .to_string();
-
-    // NOTE: Not sure if we need that.
-    // let parsed_hash: PasswordHash<'_> = PasswordHash::new(&password_hash)?;
-    // Argon2::default().verify_password(password, &parsed_hash)?;
 
     let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = conn.begin().await?;
 
@@ -334,6 +322,8 @@ pub async fn register_user(
     let account = sqlx::query!("INSERT INTO accounts (created_at) VALUES (DEFAULT) RETURNING id")
         .fetch_one(tx.as_mut())
         .await?;
+
+    let password_hash = self::hash_password(&password)?;
 
     let user = sqlx::query_as!(
         DatabaseUser,
@@ -360,11 +350,8 @@ pub async fn register_user(
 
 #[axum::debug_handler]
 pub async fn login_user(
+    State(DatabaseConnection(conn)): State<DatabaseConnection>,
     cookies: Cookies,
-    State(AppState {
-        database: DatabaseConnection(conn),
-        ..
-    }): State<AppState>,
     ExtractClientAuthenticationCredentials(credentials): ExtractClientAuthenticationCredentials<
         ClientAuthenticationCredentials,
     >,
@@ -416,10 +403,7 @@ pub async fn login_user(
 
 #[axum::debug_handler]
 pub async fn logout_user(
-    State(AppState {
-        database: DatabaseConnection(conn),
-        ..
-    }): State<AppState>,
+    State(DatabaseConnection(conn)): State<DatabaseConnection>,
     cookies: Cookies,
 ) -> self::Result<Json<ApiStatusResponse>> {
     // 1. Check if there is a user, there is a session cookie, that is valid and exists in db.
@@ -450,8 +434,9 @@ pub async fn logout_user(
             .await?;
 
             // To properly remove the cookie it has to be of the same name, path and domain.
-            let cookie = Cookie::build((cookies::SSID, "")).http_only(true).path("/");
-            cookies.remove(cookie.into());
+            // let cookie = Cookie::build((cookies::SSID, "")).http_only(true).path("/");
+            let cookie = create_ssid_cookie(ssid)?;
+            cookies.remove(cookie);
         }
         None => {
             // NOTE: This should not happen as call for server side session already validates that.
@@ -466,26 +451,36 @@ pub async fn logout_user(
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context;
+    use axum::{body::Body, extract::Request, http};
+    use http::method::Method;
+    use http_body_util::BodyExt;
+    use reqwest::header;
+    use sqlx::types::uuid;
+    use tower::ServiceExt;
+
+    use crate::{AppState, app};
+
     use super::*;
 
-    // // TODO: Write tests for the auth controller, I would probably use some kind of http client like reqwest.
-    // #[tokio::test]
-    // pub async fn test_samesite_cookie() -> anyhow::Result<()> {
-    //     let client = reqwest::Client::new();
-    //     let res = client
-    //         .post(std::env::var("CLIENT_URL").unwrap())
-    //         .body(serde_json::json!("{message: 'test'}").to_string())
-    //         .send()
-    //         .await?;
+    // Router::new()
+    // .route("/auth/session", get(get_auth_session))
+    // .route("/auth/register", post(register_user))
+    // .route("/auth/login", post(login_user))
+    // .route("/auth/logout", post(logout_user))
 
-    //     Ok(())
-    // }
+    // Generally we have to use serial_test::serial in each test that interacts with the environment that other tests
+    // can affect, specifically that include the environment variables as they are mutated while testing.
+    // If though each test that changes the env would restore it back, while tests run in parallel they may see the
+    // mutated env from other tests that was not yet restored.
+    // We may also run the tests on single threads doing cargo test -- --test-threads 1 but then each tests, even the
+    // ones that are not have to run serially are and it ends up slower.
 
-    // NOTE: This test makes config::tests::test_envs_loaded_from_file not pass, which is an absolute cinema, as it
-    // has nothing to do with that test. When isolated, they both pass.
+    // NOTE: It is worth noting, that if some test fails, try running it with cargo test -- --test-threads 1, or add [serial_test::serial]
 
     #[sqlx::test]
-    async fn test_basic(pool: sqlx::Pool<sqlx::Postgres>) -> sqlx::Result<()> {
+    #[serial_test::serial]
+    async fn test(pool: sqlx::Pool<sqlx::Postgres>) -> sqlx::Result<()> {
         sqlx::query!("SELECT * FROM _sqlx_migrations")
             .fetch_one(&pool)
             .await?;
@@ -494,10 +489,103 @@ mod tests {
     }
 
     #[test]
-    fn test_create_cookie_with_invalid_ssid_value() {
-        let result = create_ssid_cookie("invalid-uuid-string");
+    #[tracing_test::traced_test]
+    fn test_password_hash() {
+        let password = "Password1!";
+        let hash = hash_password(password).expect("Failed to hash password");
 
-        println!("Result: {:?}", result);
-        assert!(result.is_err());
+        let parsed_hash = PasswordHash::new(&hash).expect("Failed to parse password hash");
+
+        let argon2 = Argon2::default();
+
+        assert_eq!(
+            argon2.verify_password(password.as_bytes(), &parsed_hash),
+            Ok(())
+        );
+
+        assert_ne!(
+            argon2.verify_password(b"WrongPassword", &parsed_hash),
+            Ok(())
+        );
+
+        // Different salt
+        let salt = SaltString::generate(&mut OsRng);
+        let wrong_hash = argon2
+            .hash_password(password.as_bytes(), &salt)
+            .expect("Failed to hash password with different salt");
+
+        assert_ne!(
+            wrong_hash,
+            PasswordHash::new(&hash).expect("Failed to parse seemingly valid password hash")
+        );
+        assert_ne!(wrong_hash.to_string(), hash);
+    }
+
+    #[test]
+    fn test_create_ssid_cookie_invalid_uuid() {
+        assert!(create_ssid_cookie("invalid-uuid-string").is_err());
+        let valid_size = "a".repeat(uuid::Uuid::new_v4().to_string().len());
+        assert!(create_ssid_cookie(valid_size).is_err())
+    }
+
+    #[test]
+    fn test_create_ssid_cookie_valid_uuid() {
+        let uuid = Uuid::new_v4();
+
+        assert!(create_ssid_cookie(uuid).is_ok());
+        assert!(create_ssid_cookie(uuid.to_string()).is_ok());
+    }
+
+    /// Asserts that the ExtractClientAuthenticationCredentials extractor lowercases the email field.
+    #[sqlx::test]
+    #[serial_test::serial]
+    async fn test_credentials_extractor_normalizes_email(
+        pool: sqlx::Pool<sqlx::Postgres>,
+    ) -> anyhow::Result<()> {
+        // Register test handler that echos back the extracted credentials.
+        let handler = async |ExtractClientAuthenticationCredentials(credentials): ExtractClientAuthenticationCredentials<
+        ClientAuthenticationCredentials>| {
+            Json(credentials)
+        };
+
+        let app = app(AppState::new(DatabaseConnection(pool)))
+            .await
+            .context("failed to build app")?
+            .route("/test", post(handler));
+
+        let credentials = ClientAuthenticationCredentials {
+            email: "UPPERCASE_VALID_EMAIL@gmail.com".into(),
+            password: "Password1!".into(),
+        };
+
+        let body = serde_json::to_string(&credentials)
+            .context("failed to serialize credentials to JSON")?;
+
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/test")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .context("failed to build request")?;
+
+        let response = app
+            .oneshot(request)
+            .await
+            .context("request failed in app.oneshot")?;
+
+        let response_body = response
+            .into_body()
+            .collect()
+            .await
+            .context("failed to collect response body")?
+            .to_bytes();
+
+        let response_credentials = serde_json::from_str::<ClientAuthenticationCredentials>(
+            std::str::from_utf8(&response_body)?,
+        )?;
+
+        assert!(response_credentials.email == credentials.email.to_lowercase());
+
+        Ok(())
     }
 }

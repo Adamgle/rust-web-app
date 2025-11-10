@@ -2,14 +2,10 @@ mod error;
 pub mod types;
 use std::sync::Arc;
 
-use axum::extract::FromRef;
 pub use error::Error;
 use futures::TryFutureExt;
 
-use crate::{
-    AppState,
-    config::{self, Env, EnvError},
-};
+use crate::config::{self, Env, EnvError};
 
 pub(in crate::database) type Result<T> = std::result::Result<T, self::Error>;
 
@@ -46,9 +42,15 @@ impl DatabaseConnection {
     }
 }
 
-impl FromRef<AppState> for DatabaseConnection {
-    fn from_ref(state: &AppState) -> Self {
-        // That internally clones an Arc.
-        state.database.clone()
+impl From<sqlx::Pool<sqlx::Postgres>> for DatabaseConnection {
+    fn from(value: sqlx::Pool<sqlx::Postgres>) -> Self {
+        DatabaseConnection(value)
     }
 }
+
+// impl FromRef<AppState> for DatabaseConnection {
+//     fn from_ref(state: &AppState) -> Self {
+//         // That internally clones an Arc.
+//         state.database.clone()
+//     }
+// }
