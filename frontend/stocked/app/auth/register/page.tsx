@@ -21,7 +21,7 @@ const handleRegister: LoginPageProps["onSubmit"] = async (e) => {
     const error = { message: "Invalid email or password" } as ApiClientError;
     console.error("Validation error: ", error);
 
-    return error;
+    throw error;
   }
 
   try {

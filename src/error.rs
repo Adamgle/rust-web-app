@@ -115,8 +115,6 @@ where
         let s = self.clone();
         let mut response = representation.clone().into_response();
 
-        println!("s: {} | response: {:?}", s, representation);
-
         // For middleware-tower logging
         response.extensions_mut().insert(Arc::new(Self::to(s)));
 

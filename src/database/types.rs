@@ -21,6 +21,11 @@ pub struct DatabaseUser {
     // pub password_salt: String,
 }
 
+pub struct DatabaseAccount {
+    pub id: i32,
+    pub created_at: chrono::NaiveDate,
+}
+
 // NOTE: That table is useless, we can just generate another row in the session with the same user_id.
 // pub struct UserSessionsJunction {
 //     user_id: i32,
@@ -34,7 +39,7 @@ pub struct DatabaseUser {
 // ### Client-facing types
 
 /// Stripped from sensitive info about the user
-#[derive(serde::Serialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct ClientUser {
     pub id: i32,
     pub balance: f32,

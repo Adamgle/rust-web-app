@@ -21,8 +21,8 @@ pub enum Error {
     },
     #[error("Session expired at: {0}")]
     SessionExpired(String),
-    #[error("User not found")]
-    UserNotFound,
+    // #[error("User not found")]
+    // UserNotFound,
     #[error("Weak password does not meet the policy requirements: {0}")]
     PasswordRequirementsNotMet(String),
     // NOTE: We are not leaking the inner error message to avoid leaking sensitive information,
@@ -75,10 +75,6 @@ impl IntoResponse for Error {
                 status: axum::http::StatusCode::UNAUTHORIZED,
                 message,
             },
-            Error::UserNotFound => ErrorResponse {
-                status: axum::http::StatusCode::NOT_FOUND,
-                message,
-            },
             Error::PasswordRequirementsNotMet(_) => ErrorResponse {
                 status: axum::http::StatusCode::BAD_REQUEST,
                 message,
@@ -102,7 +98,11 @@ impl IntoResponse for Error {
                 status: axum::http::StatusCode::BAD_REQUEST,
                 message,
             },
-            Error::ClientError { .. } | Error::Other(_) => ErrorResponse {
+            Error::ClientError { .. } => ErrorResponse {
+                status: axum::http::StatusCode::BAD_REQUEST,
+                message,
+            },
+            Error::Other(_) => ErrorResponse {
                 status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 message,
             },

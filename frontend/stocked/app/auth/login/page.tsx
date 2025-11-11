@@ -44,8 +44,6 @@ export const validatePasswordPolicy = (password: string): boolean => {
     has_special ||= SPECIAL_CHARACTERS.includes(char);
   }
 
-  console.log({ has_uppercase, has_lowercase, has_digit, has_special });
-
   return has_uppercase && has_lowercase && has_digit && has_special;
 };
 
@@ -61,7 +59,7 @@ const handleLogin: LoginPageProps["onSubmit"] = async (e) => {
     const error = { message: "Invalid email or password" } as ApiClientError;
     console.error("Validation error: ", error);
 
-    return error;
+    throw error;
   }
 
   try {
@@ -104,10 +102,9 @@ export function LoginForm({
     setError(null);
 
     try {
-      await onSubmit(e);
+      await onSubmit(e).then((_) => router.push("/"));
 
       // Redirect on successful login
-      router.push("/");
     } catch (error: any) {
       // Capture API or validation errors
       console.error("Login error:", error);

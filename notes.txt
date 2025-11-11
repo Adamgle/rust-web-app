@@ -322,6 +322,8 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
           We would hold some single secret server-side, verify if the cookie is valid given that key and then precede with the request or abort early.
      5. Errors that occur, client and server-side are not stored anywhere, I would like to able to hold the client errors in some kind of Postgres table
           as a JSON type thought I need to explore that, surely it would be unstructured logs, or semi-structure.
+5. Payloads are not restricted to size
+6. 
 
 ### TODO:
 Writing tests for controller::auth

@@ -1,6 +1,7 @@
 //! NOTE: The authentication controller module could probably be consider an abomination of this project.
 
 mod error;
+mod password_policy;
 
 use std::sync::Arc;
 
@@ -23,11 +24,42 @@ use crate::{
 use axum::{
     Json, Router,
     extract::{FromRef, FromRequest, State, rejection::JsonRejection},
-    response::IntoResponse,
     routing::{get, post},
 };
 
 pub(in crate::controller::auth) type Result<T> = std::result::Result<T, self::Error>;
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ClientAuthenticationCredentials {
+    pub email: String,
+    pub password: String,
+}
+
+/// A custom extractor to normalize the email to lowercase, obvious overkill.
+/// I think I could achieve that with deserialize attributes to serde, but not sure.
+pub struct ExtractClientAuthenticationCredentials<T>(pub T);
+
+impl<S> FromRequest<S> for ExtractClientAuthenticationCredentials<ClientAuthenticationCredentials>
+where
+    axum::Json<ClientAuthenticationCredentials>: FromRequest<S, Rejection = JsonRejection>,
+    S: Send + Sync,
+{
+    type Rejection = JsonRejection;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> std::result::Result<Self, Self::Rejection> {
+        match axum::Json::<ClientAuthenticationCredentials>::from_request(req, state).await {
+            Ok(mut value) => {
+                value.email = value.email.to_lowercase();
+
+                Ok(Self(value.0))
+            }
+            Err(rejection) => Err(rejection),
+        }
+    }
+}
 
 pub fn router<S: Clone + Send + Sync + 'static>() -> axum::Router<S>
 where
@@ -82,6 +114,7 @@ pub async fn get_server_side_session(
         return Err(self::Error::SessionExpired(expires_at.to_string()));
     }
 
+    // This does not make sens because the session would no exist without the user,
     let Some(user) = sqlx::query_as!(
         ClientUser,
         "SELECT id, balance, delta, created_at, email FROM users WHERE users.id = $1",
@@ -91,7 +124,9 @@ pub async fn get_server_side_session(
     .await?
     else {
         // That should not happen, as we have a valid session with a user_id.
-        return Err(self::Error::UserNotFound);
+        return Err(self::Error::Other(Arc::new(anyhow::anyhow!(
+            "User not found for valid session"
+        ))));
     };
 
     return Ok(user);
@@ -103,80 +138,6 @@ pub async fn get_auth_session(
     cookies: Cookies,
 ) -> self::Result<Json<ClientUser>> {
     return Ok(Json(self::get_server_side_session(&conn, &cookies).await?));
-}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct ClientAuthenticationCredentials {
-    pub email: String,
-    pub password: String,
-}
-
-// We are doing the module trick to isolate the const flags, which, bear with me, are useless.
-mod password_policy {
-    // We are not restricting any letters or symbols for the password, just enforcing some policies.
-    // Although I am not sure if that is a good idea.
-
-    // TODO: Port that to client-side.
-    const MIN_LENGTH: usize = 8;
-    const MAX_LENGTH: usize = 128;
-    const SPECIAL_CHARACTERS: &str = "!@#$%^&*()-+";
-    const REQUIRE_SPECIAL_CHARACTERS: bool = true;
-    const REQUIRE_UPPERCASE: bool = true;
-    const REQUIRE_DIGIT: bool = true;
-    const REQUIRE_LOWERCASE: bool = true;
-
-    pub fn validate_password_policy(password: &str) -> bool {
-        // NOTE: That is not the length, that is the size in bytes as this is how the len function works, it may behave unexpectedly with the grapheme rich symbols,
-        // leave that be.
-
-        let size = password.len();
-
-        if !(MIN_LENGTH..MAX_LENGTH).contains(&size) {
-            return false;
-        }
-
-        let (mut has_uppercase, mut has_lowercase, mut has_digit, mut has_special) = (
-            !REQUIRE_UPPERCASE,
-            !REQUIRE_LOWERCASE,
-            !REQUIRE_DIGIT,
-            !REQUIRE_SPECIAL_CHARACTERS,
-        );
-
-        for char in password.chars() {
-            if !has_uppercase && char.is_uppercase() {
-                has_uppercase = true;
-            } else if !has_lowercase && char.is_lowercase() {
-                has_lowercase = true;
-            } else if !has_digit && char.is_ascii_digit() {
-                has_digit = true;
-            } else if !has_special && SPECIAL_CHARACTERS.contains(char) {
-                has_special = true;
-            }
-
-            // Early exit if all requirements are met, size is already early satisfied .
-            if has_uppercase && has_lowercase && has_digit && has_special {
-                return true;
-            }
-        }
-
-        return has_uppercase && has_lowercase && has_digit && has_special;
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::validate_password_policy;
-
-        #[test]
-        fn test_password_policy() {
-            assert!(validate_password_policy("Password1!"));
-            assert!(!validate_password_policy("weakpass"));
-            assert!(!validate_password_policy("Short1!"));
-            assert!(!validate_password_policy("NoSpecialChar1"));
-            assert!(!validate_password_policy("NOLOWERCASE1!"));
-            assert!(!validate_password_policy("nouppercase1!"));
-            assert!(!validate_password_policy("NoDigit!"));
-        }
-    }
 }
 
 /// NOTE: I am not sure if I want to isolate such logic into separate functions as it's not very flexible.
@@ -195,7 +156,7 @@ pub async fn create_database_session(
 }
 
 // I want it to take the ssid as a string or uuid, if string then that should be convertible to uuid,
-fn create_ssid_cookie<T: TryInto<Uuid>>(ssid: T) -> self::Result<Cookie<'static>>
+pub fn create_ssid_cookie<T: TryInto<Uuid>>(ssid: T) -> self::Result<Cookie<'static>>
 where
     <T as std::convert::TryInto<sqlx::types::Uuid>>::Error: std::fmt::Debug,
     T::Error: std::error::Error + Send + Sync + 'static,
@@ -216,33 +177,7 @@ where
         .into())
 }
 
-/// A custom extractor to normalize the email to lowercase, obvious overkill.
-/// I think I could achieve that with deserialize attributes to serde, but not sure.
-pub struct ExtractClientAuthenticationCredentials<T>(pub T);
-
-impl<S> FromRequest<S> for ExtractClientAuthenticationCredentials<ClientAuthenticationCredentials>
-where
-    axum::Json<ClientAuthenticationCredentials>: FromRequest<S, Rejection = JsonRejection>,
-    S: Send + Sync,
-{
-    type Rejection = JsonRejection;
-
-    async fn from_request(
-        req: axum::extract::Request,
-        state: &S,
-    ) -> std::result::Result<Self, Self::Rejection> {
-        match axum::Json::<ClientAuthenticationCredentials>::from_request(req, state).await {
-            Ok(mut value) => {
-                value.email = value.email.to_lowercase();
-
-                Ok(Self(value.0))
-            }
-            Err(rejection) => Err(rejection),
-        }
-    }
-}
-
-fn hash_password(password: &str) -> self::Result<String> {
+pub fn hash_password(password: &str) -> self::Result<String> {
     // NOTE: As per documentation OsRng use may block the OS, maybe that should be put inside the tokio::task::spawn_blocking
 
     let salt = SaltString::generate(&mut OsRng);
@@ -260,7 +195,7 @@ pub async fn register_user(
     ExtractClientAuthenticationCredentials(credentials): ExtractClientAuthenticationCredentials<
         ClientAuthenticationCredentials,
     >,
-) -> self::Result<impl IntoResponse> {
+) -> self::Result<Json<ClientUser>> {
     // To register a user we need to:
     // 1. Take the email and password from the user, send it over HTTP, ideally that would be HTTPS
     // but we are not doing that.
@@ -345,7 +280,7 @@ pub async fn register_user(
 
     tx.commit().await?;
 
-    return Ok(axum::response::IntoResponse::into_response(Json(user)));
+    return Ok(Json(user));
 }
 
 #[axum::debug_handler]
@@ -412,36 +347,55 @@ pub async fn logout_user(
 
     // NOTE: Maybe that should be a transaction.
 
-    self::get_server_side_session(&conn, &cookies)
-        .await
-        .map_err(|e| self::Error::ClientError {
+    // That should not happen as the endpoint should not be called when user is not logged in the first place.
+    // Practically speaking, the only error that can happen is that error, when user modified the cookie and is invalid,
+    // is expired, was removed from the database or does not exist in the first place and endpoint was still called.
+    // We are wrapping each as the client error and does not even need to test for those possibilities, just wrapping with self::Error::ClientError.
+
+    if let Err(e) = self::get_server_side_session(&conn, &cookies).await {
+        // We are wrapping that in the ClientError to avoid bloating client with the error message
+        // that is not relevant to them, also we just want to log BAD_REQUEST to them and this provides the formatting.
+        return Err(self::Error::ClientError {
             source: Some(Arc::new(e.into())),
-        })?;
+        });
+    }
 
     match cookies.get(cookies::SSID).map(|c| c.value().to_owned()) {
         Some(ssid) => {
-            let ssid = Uuid::parse_str(&ssid).map_err(|e| self::Error::ClientError {
-                source: Some(Arc::new(e.into())),
-            })?;
+            // Client sent invalid ssid cookie, that should not happen as we already validated the session above.
+            let ssid = match Uuid::parse_str(&ssid) {
+                Ok(s) => s,
+                Err(e) => {
+                    let error = self::Error::InvalidSessionCookieWrongUuidFormat {
+                        ssid: Some(ssid),
+                        source: Arc::new(anyhow::Error::new(e)),
+                    };
+
+                    return Err(self::Error::ClientError {
+                        source: Some(Arc::new(anyhow::Error::new(error))),
+                    });
+                }
+            };
 
             // Delete the session from the database.
-            sqlx::query!(
-                "DELETE FROM sessions WHERE id = $1::uuid",
-                // That should not happen
-                ssid
-            )
-            .execute(&conn)
-            .await?;
+            sqlx::query!("DELETE FROM sessions WHERE id = $1::uuid", ssid)
+                .execute(&conn)
+                .await?;
 
             // To properly remove the cookie it has to be of the same name, path and domain.
             // let cookie = Cookie::build((cookies::SSID, "")).http_only(true).path("/");
-            let cookie = create_ssid_cookie(ssid)?;
+
+            let cookie = create_ssid_cookie(ssid).map_err(|e| self::Error::ClientError {
+                source: Some(Arc::new(anyhow::Error::new(e))),
+            })?;
             cookies.remove(cookie);
         }
         None => {
             // NOTE: This should not happen as call for server side session already validates that.
+            let error = self::Error::MissingSessionCookie;
+
             return Err(self::Error::ClientError {
-                source: Some(Arc::new(anyhow::anyhow!(self::Error::MissingSessionCookie))),
+                source: Some(Arc::new(anyhow::anyhow!(error))),
             });
         }
     };
