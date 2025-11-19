@@ -48,6 +48,7 @@ pub enum Env {
     DbPostgresAdambPassword,
     DatabaseUrl,
     RustLog,
+    HmacSecretKey,
 }
 
 impl Env {
@@ -155,8 +156,14 @@ impl Config {
     }
 }
 
-// TODO: Write tests for the Env enum and the .env file 1-1 mapping.
 #[cfg(test)]
+/// Those tests touch up the environment which should not happen, we are mitigating that by running those tests serially
+/// so none would interfere with each other but there could be interference with other tests in the codebase that are not part of this module.
+/// Technically we should add [serial_test::serial] to every test that touches the envs and it may get messy,
+/// Maybe those tests should be run separate from other modules to avoid interference.
+///
+/// NOTE: Running tests with cargo test -- --test-threads=1 would make those tests run in a single thread,
+/// that may help to debug if some tests do not pass even if it is believed to be correct.
 mod tests {
     use crate::config::Env;
     use std::{

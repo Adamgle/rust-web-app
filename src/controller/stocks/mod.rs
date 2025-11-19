@@ -1,9 +1,8 @@
 mod error;
 pub use error::Error;
-use sqlx::types::chrono;
 use tracing::info;
 
-use crate::{controller::error::GenericControllerError, database::DatabaseConnection};
+use crate::{controller::GenericControllerError, database::{DatabaseConnection, types::Stock}};
 use axum::{
     extract::{FromRef, Json, Path, State},
     response::IntoResponse,
@@ -20,20 +19,6 @@ where
         .route("/stocks/{id}", axum::routing::get(get_stock))
 }
 
-// https://docs.rs/sqlx/latest/sqlx/postgres/types/index.html#types
-#[derive(serde::Serialize)]
-
-// TODO: Delegate the database schemas to separate module/file.
-pub struct Stock {
-    id: i32, // That should be unsigned, but it fails converting to u32, as postgres does not have unsigned, like a [1, 2^31 - 1]
-    abbreviation: String,
-    company: String,
-    since: chrono::NaiveDate, // DATE
-    price: f32,
-    delta: f32,
-    last_update: chrono::NaiveDate, // TIMESTAMP
-    created_at: chrono::NaiveDate,  // TIMESTAMP
-}
 
 // Not a handler.
 // <T: DeserializeOwned + Send + Sync>(
@@ -42,6 +27,8 @@ async fn list_stocks(DatabaseConnection(conn): DatabaseConnection) -> self::Resu
     // let account = sqlx::query_file!("tests/test-query-account-by-id.sql", 1i32)
     //     .fetch_one(&mut conn)
     //     .await?;
+
+    // "SELECT * FROM users WHERE hash = " + (&str &hash) => ""
 
     // That maps the query result to the struct Stock.
     Ok(sqlx::query_as!(Stock, "SELECT * FROM stocks")

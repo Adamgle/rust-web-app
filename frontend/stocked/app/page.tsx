@@ -4,10 +4,7 @@ import Header from "./components/Header";
 import Navbar from "./components/Navbar";
 import { Stocks } from "./components/Stocks";
 
-// TODO: This header should be in the layout, probably it would have to be inherited in each page.
-
 export default function Page() {
-  // return <h1 className="text-2xl">Stocked | Make beaucoup-Bucks</h1>;
   return (
     <div className="flex w-full flex-col items-center justify-center gap-12 p-8">
       <Header />

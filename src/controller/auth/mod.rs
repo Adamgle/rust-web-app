@@ -11,11 +11,13 @@ use argon2::{
 };
 
 pub use error::Error;
+use hmac::{Hmac, Mac};
 use sqlx::{Executor, Pool, types::Uuid};
 use tower_cookies::{Cookie, Cookies};
 
 use crate::{
-    controller::{cookies, types::ApiStatusResponse},
+    config::{self, Env, EnvError},
+    controller::{cookies, error::GenericControllerError, types::ApiStatusResponse},
     database::{
         DatabaseConnection,
         types::{ClientUser, DatabaseSession, DatabaseUser},
@@ -72,24 +74,67 @@ where
         .route("/auth/logout", post(logout_user))
 }
 
+/// Generate HMAC Mac for the given bytes using the HMAC secret key from environment variable.
+pub fn generate_hmac_mac(bytes: &[u8]) -> self::Result<Hmac<sha2::Sha256>> {
+    let hmac_key = dotenvy::var(Env::HmacSecretKey.as_ref())
+        .map_err(|e| config::Error::Env(EnvError::MissingEnv(Arc::from(e))))?;
+
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(hmac_key.as_bytes())
+        // That would be server error as the HMAC key stored on the server is invalid.
+        .map_err(|e| self::Error::Other(Arc::new(anyhow::Error::new(e))))?;
+
+    mac.update(bytes);
+    Ok(mac)
+}
+
+/// Parse and verify the SSID cookie using HMAC signature.
+pub fn parse_ssid_cookie(cookie: Cookie) -> self::Result<Uuid> {
+    let (ssid, signature) = match cookie.value().split_once(cookies::SSID_SEPARATOR) {
+        Some((ssid, signature)) => (ssid, signature),
+        None => {
+            // NOTE: In theory, there could be no signature part or there could be no ssid.
+            return Err(self::Error::InvalidSessionCookieWrongFormat {
+                ssid: Some(cookie.to_string()),
+            });
+        }
+    };
+
+    let ssid =
+        Uuid::parse_str(ssid).map_err(|e| self::Error::InvalidSessionCookieWrongUuidFormat {
+            ssid: Some(ssid.to_string()),
+            source: Arc::new(anyhow::Error::new(e)),
+        })?;
+
+    // Decode the signature
+    let signature = hex::decode(signature).map_err(|e| {
+        self::Error::InvalidSessionCookieHmacVerificationFailed {
+            ssid: Some(cookie.to_string()),
+            source: Arc::new(anyhow::Error::new(e)),
+        }
+    })?;
+
+    let mac = self::generate_hmac_mac(ssid.as_bytes())?;
+
+    mac.verify_slice(&signature).map_err(|e| {
+        self::Error::InvalidSessionCookieHmacVerificationFailed {
+            ssid: Some(cookie.to_string()),
+            source: Arc::new(anyhow::Error::new(e)),
+        }
+    })?;
+
+    Ok(ssid)
+}
+
 pub async fn get_server_side_session(
     conn: &Pool<sqlx::Postgres>,
     cookies: &Cookies,
 ) -> self::Result<ClientUser> {
-    let Some(cookie_ssid) = cookies.get(cookies::SSID) else {
+    // TODO: Verify the SSID cookie signature against HMAC.
+    let Some(cookie) = cookies.get(cookies::SSID) else {
         return Err(self::Error::MissingSessionCookie);
     };
 
-    let cookie_ssid = cookie_ssid.value();
-
-    // TODO: Test the error, how it behaves when the UUID is invalid.
-    // let cookie_ssid: Uuid = cookie_ssid.try_into()
-    let cookie_ssid: Uuid = Uuid::parse_str(cookie_ssid).map_err(|e| {
-        self::Error::InvalidSessionCookieWrongUuidFormat {
-            ssid: Some(cookie_ssid.to_string()),
-            source: Arc::new(anyhow::Error::new(e)),
-        }
-    })?;
+    let cookie_ssid = self::parse_ssid_cookie(cookie.clone())?;
 
     // Check if the sessions exists for the ssid cookie.
     // NOTE: Not sure why I have to cast the $1 to uuid, but without it it fails.
@@ -132,7 +177,6 @@ pub async fn get_server_side_session(
     return Ok(user);
 }
 
-#[axum::debug_handler]
 pub async fn get_auth_session(
     State(DatabaseConnection(conn)): State<DatabaseConnection>,
     cookies: Cookies,
@@ -161,7 +205,7 @@ where
     <T as std::convert::TryInto<sqlx::types::Uuid>>::Error: std::fmt::Debug,
     T::Error: std::error::Error + Send + Sync + 'static,
 {
-    let s = ssid
+    let ssid = ssid
         .try_into()
         .map_err(|e| self::Error::InvalidSessionCookieWrongUuidFormat {
             // Cannot get the ssid string here unfortunately.
@@ -169,7 +213,16 @@ where
             source: Arc::new(anyhow::Error::new(e)),
         })?;
 
-    Ok(Cookie::build((cookies::SSID, s.to_string()))
+    let mac = self::generate_hmac_mac(ssid.as_bytes())?;
+
+    let result = mac.finalize();
+    let signature = result.into_bytes();
+
+    let signature = hex::encode(signature);
+
+    let value = format!("{}{}{}", ssid, cookies::SSID_SEPARATOR, signature);
+
+    Ok(Cookie::build((cookies::SSID, value))
         .http_only(true)
         .path("/")
         .same_site(tower_cookies::cookie::SameSite::Strict)
@@ -188,7 +241,6 @@ pub fn hash_password(password: &str) -> self::Result<String> {
     Ok(hash)
 }
 
-#[axum::debug_handler]
 pub async fn register_user(
     State(DatabaseConnection(conn)): State<DatabaseConnection>,
     cookies: Cookies,
@@ -277,13 +329,11 @@ pub async fn register_user(
 
     let cookie = self::create_ssid_cookie(ssid)?;
     cookies.add(cookie);
-
     tx.commit().await?;
 
     return Ok(Json(user));
 }
 
-#[axum::debug_handler]
 pub async fn login_user(
     State(DatabaseConnection(conn)): State<DatabaseConnection>,
     cookies: Cookies,
@@ -336,7 +386,6 @@ pub async fn login_user(
     return Ok(Json(ClientUser::from(user)));
 }
 
-#[axum::debug_handler]
 pub async fn logout_user(
     State(DatabaseConnection(conn)): State<DatabaseConnection>,
     cookies: Cookies,
@@ -355,27 +404,15 @@ pub async fn logout_user(
     if let Err(e) = self::get_server_side_session(&conn, &cookies).await {
         // We are wrapping that in the ClientError to avoid bloating client with the error message
         // that is not relevant to them, also we just want to log BAD_REQUEST to them and this provides the formatting.
-        return Err(self::Error::ClientError {
-            source: Some(Arc::new(e.into())),
-        });
+        return Err(self::Error::from(GenericControllerError::ClientError {
+            source: Some(Arc::new(anyhow::Error::new(e))),
+        }));
     }
 
-    match cookies.get(cookies::SSID).map(|c| c.value().to_owned()) {
-        Some(ssid) => {
+    match cookies.get(cookies::SSID) {
+        Some(cookie) => {
             // Client sent invalid ssid cookie, that should not happen as we already validated the session above.
-            let ssid = match Uuid::parse_str(&ssid) {
-                Ok(s) => s,
-                Err(e) => {
-                    let error = self::Error::InvalidSessionCookieWrongUuidFormat {
-                        ssid: Some(ssid),
-                        source: Arc::new(anyhow::Error::new(e)),
-                    };
-
-                    return Err(self::Error::ClientError {
-                        source: Some(Arc::new(anyhow::Error::new(error))),
-                    });
-                }
-            };
+            let ssid = self::parse_ssid_cookie(cookie)?;
 
             // Delete the session from the database.
             sqlx::query!("DELETE FROM sessions WHERE id = $1::uuid", ssid)
@@ -385,18 +422,23 @@ pub async fn logout_user(
             // To properly remove the cookie it has to be of the same name, path and domain.
             // let cookie = Cookie::build((cookies::SSID, "")).http_only(true).path("/");
 
-            let cookie = create_ssid_cookie(ssid).map_err(|e| self::Error::ClientError {
-                source: Some(Arc::new(anyhow::Error::new(e))),
-            })?;
+            // We are recreating the cookie to remove it to be sure it has the same attributes, specifically
+            // the same name, path and domain.
+            let cookie =
+                create_ssid_cookie(ssid).map_err(|e| GenericControllerError::ClientError {
+                    source: Some(Arc::new(anyhow::Error::new(e))),
+                })?;
             cookies.remove(cookie);
         }
         None => {
             // NOTE: This should not happen as call for server side session already validates that.
             let error = self::Error::MissingSessionCookie;
 
-            return Err(self::Error::ClientError {
-                source: Some(Arc::new(anyhow::anyhow!(error))),
-            });
+            return Err(self::Error::GenericControllerError(
+                GenericControllerError::ClientError {
+                    source: Some(Arc::new(anyhow::anyhow!(error))),
+                },
+            ));
         }
     };
 
@@ -417,12 +459,6 @@ mod tests {
 
     use super::*;
 
-    // Router::new()
-    // .route("/auth/session", get(get_auth_session))
-    // .route("/auth/register", post(register_user))
-    // .route("/auth/login", post(login_user))
-    // .route("/auth/logout", post(logout_user))
-
     // Generally we have to use serial_test::serial in each test that interacts with the environment that other tests
     // can affect, specifically that include the environment variables as they are mutated while testing.
     // If though each test that changes the env would restore it back, while tests run in parallel they may see the
@@ -431,16 +467,6 @@ mod tests {
     // ones that are not have to run serially are and it ends up slower.
 
     // NOTE: It is worth noting, that if some test fails, try running it with cargo test -- --test-threads 1, or add [serial_test::serial]
-
-    #[sqlx::test]
-    #[serial_test::serial]
-    async fn test(pool: sqlx::Pool<sqlx::Postgres>) -> sqlx::Result<()> {
-        sqlx::query!("SELECT * FROM _sqlx_migrations")
-            .fetch_one(&pool)
-            .await?;
-
-        Ok(())
-    }
 
     #[test]
     #[tracing_test::traced_test]
@@ -486,8 +512,184 @@ mod tests {
     fn test_create_ssid_cookie_valid_uuid() {
         let uuid = Uuid::new_v4();
 
-        assert!(create_ssid_cookie(uuid).is_ok());
-        assert!(create_ssid_cookie(uuid.to_string()).is_ok());
+        let cookie = super::create_ssid_cookie(uuid);
+
+        assert!(cookie.is_ok());
+        assert!(super::create_ssid_cookie(uuid.to_string()).is_ok());
+
+        // Cookie ssid and signature are valid
+        let ssid = super::parse_ssid_cookie(cookie.unwrap());
+        assert!(ssid.is_ok());
+    }
+
+    #[test]
+    fn test_parse_cookie_invalid_cookie_format() -> anyhow::Result<()> {
+        let valid_signed_signature = super::create_ssid_cookie(Uuid::new_v4())?
+            .value()
+            .split_once(cookies::SSID_SEPARATOR)
+            .unwrap()
+            .1
+            .to_string();
+
+        let invalid_cookie_values = vec![
+            "just-a-random-string-without-separator".to_string(),
+            format!("random-string{}random-string", cookies::SSID_SEPARATOR), // valid format with invalid ssid and signature.
+            uuid::Uuid::new_v4().to_string(), // valid UUID but no signature
+            format!("{}{}", cookies::SSID_SEPARATOR, valid_signed_signature), // Valid signature but no UUID
+            format!(
+                "{}{}{}",
+                uuid::Uuid::new_v4().to_string(),
+                cookies::SSID_SEPARATOR,
+                valid_signed_signature
+            ), // valid format, valid uuid and valid signature, but signature not for the registered ssid cookie
+            format!(
+                "{}{}",
+                uuid::Uuid::new_v4().to_string().as_str(),
+                cookies::SSID_SEPARATOR,
+            ), // valid UUID with separator but no signature
+            format!(
+                "{}{}{}",
+                uuid::Uuid::new_v4().to_string().as_str(),
+                cookies::SSID_SEPARATOR,
+                "a".repeat(64)
+            ), // valid UUID with separator but invalid signature
+            "".to_string(),                      // empty string
+            cookies::SSID_SEPARATOR.to_string(), // just separator
+        ];
+
+        for invalid_value in invalid_cookie_values {
+            let cookie = Cookie::new(cookies::SSID, invalid_value.to_string());
+            let result = super::parse_ssid_cookie(cookie);
+
+            // All we care about here is that it errors out.
+            assert!(result.is_err());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_cookie_signature_wrong_format() -> anyhow::Result<()> {
+        let ssid = Uuid::new_v4();
+        let mut cookie = super::create_ssid_cookie(ssid)?;
+        let mut parts = cookie
+            .value()
+            .split(cookies::SSID_SEPARATOR)
+            .map(String::from)
+            .collect::<Vec<String>>();
+
+        assert_eq!(parts.len(), 2);
+
+        // We would take the signature, decode the hex value, take the bytes, concatenate those and write it to tamper the cookie.
+        let signature = hex::decode(&parts[1])?
+            .iter()
+            .map(|b| format!("{:x}", b))
+            .collect::<String>();
+
+        parts[1] = signature;
+        cookie.set_value(parts.join(cookies::SSID_SEPARATOR));
+
+        let result = super::parse_ssid_cookie(cookie.clone());
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            self::Error::InvalidSessionCookieHmacVerificationFailed { .. }
+        ));
+
+        Ok(())
+    }
+
+    /// This tests whether the parsing fails if we would supply the cookie with valid signature, meaning signed
+    /// with correct HMAC key, but for different ssid value.
+    #[test]
+    fn test_parse_cookie_correct_signature_for_wrong_ssid_value() -> anyhow::Result<()> {
+        let mut cookie = super::create_ssid_cookie(Uuid::new_v4())?;
+        let mut parts = cookie
+            .value()
+            .split(cookies::SSID_SEPARATOR)
+            .map(String::from)
+            .collect::<Vec<String>>();
+
+        assert_eq!(parts.len(), 2);
+
+        let different_cookie = super::create_ssid_cookie(Uuid::new_v4())?
+            .value()
+            .split(cookies::SSID_SEPARATOR)
+            .map(String::from)
+            .collect::<Vec<String>>();
+
+        assert_eq!(different_cookie.len(), 2);
+
+        let different_signature = &different_cookie[1];
+
+        // Change the signature for valid, but for different cookie.
+        parts[1] = different_signature.to_string();
+        cookie.set_value(parts.join(cookies::SSID_SEPARATOR));
+
+        let parsed = super::parse_ssid_cookie(cookie);
+        assert!(parsed.is_err());
+        assert!(matches!(
+            parsed.unwrap_err(),
+            self::Error::InvalidSessionCookieHmacVerificationFailed { .. }
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_cookie_invalid_signature() {
+        let ssid = Uuid::new_v4();
+        let mut cookie = super::create_ssid_cookie(ssid).expect("Failed to create SSID cookie");
+
+        // Tamper with the cookie value to invalidate the HMAC signature.
+        let mut parts = cookie
+            .value()
+            .split(cookies::SSID_SEPARATOR)
+            .map(String::from)
+            .collect::<Vec<String>>();
+
+        assert_eq!(parts.len(), 2);
+
+        let invalid_signature_invalid_size = [1u8; 16];
+        let invalid_signature_valid_size: [u8; 32] = [0u8; 32];
+
+        for invalid_signature in [
+            hex::encode(invalid_signature_invalid_size),
+            hex::encode(invalid_signature_valid_size),
+        ] {
+            parts[1] = invalid_signature;
+            let tampered_value = parts.join(cookies::SSID_SEPARATOR);
+            cookie.set_value(tampered_value);
+
+            let result = super::parse_ssid_cookie(cookie.clone());
+            assert!(result.is_err());
+
+            let result = result.unwrap_err();
+
+            matches!(
+                result,
+                self::Error::InvalidSessionCookieHmacVerificationFailed { .. }
+            );
+        }
+    }
+
+    #[test]
+    fn test_hmac_signature_encoding_decoding() -> anyhow::Result<()> {
+        // Generate the HMAC signature with the private key using uuid.
+        // Encode the signature to hex, decode to bytes and check if it matches the original signature bytes.
+
+        let ssid = Uuid::new_v4();
+
+        // NOTE: Uuid::as_bytes() is different from doing Uuid::to_string().as_bytes() and that will fail.
+        let mac = super::generate_hmac_mac(ssid.as_bytes())?;
+        let result = mac.finalize();
+        let signature = result.into_bytes();
+
+        let hex_signature = hex::encode(signature);
+        assert!(hex::decode(&hex_signature)? == signature.to_vec());
+
+        Ok(())
     }
 
     /// Asserts that the ExtractClientAuthenticationCredentials extractor lowercases the email field.

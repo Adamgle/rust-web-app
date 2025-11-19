@@ -10,21 +10,17 @@ use std::{borrow::Cow, fmt::Display, sync::Arc};
 use axum::response::IntoResponse;
 
 #[derive(thiserror::Error, Debug, Clone)]
-// #[error("Config error occurred: {0}")]
 #[error(transparent)]
 pub enum Error {
-    // The idea is variants per module that wrap it's inner errors.
+    // The idea is variants per module that wrap it's inners errors.
     Config(#[from] crate::config::Error),
-    // There is not module called database. Think about making one.
     Database(#[from] crate::database::Error),
     Controller(#[from] crate::controller::Error),
     // When we use the value interpolation here, we must not leak any sensitive information.
     // We would be using that as a "message" for the client error, of course, if data is transparent
     // that it may be included. Of course that only applies to error implementing IntoResponse.
     // Not interpolating the inner error is not an issues, as the middleware would still log it.
-    // #[error("I/O error occurred")]
     Io(#[from] Arc<std::io::Error>),
-    // #[error(transparent)]
     // That is kind of a catch-all variant
     Other(#[from] Arc<anyhow::Error>),
 }
@@ -53,6 +49,7 @@ pub struct ErrorResponse<'a> {
 }
 
 impl Default for ErrorResponse<'_> {
+    /// Defaults to 500 Internal Server Error with generic message.
     fn default() -> Self {
         Self {
             message: Cow::Borrowed("Internal Server Error"),
@@ -105,6 +102,9 @@ where
     Self: Display + Sized + Clone + IntoResponse,
 {
     /// Convert the variant error into the crate-level error to allow inserting it into the `Extension` of the response.
+    ///
+    /// The middleware tracks the errors by it's TypeId, if we would return error of not crate-level Error it is of different TypeId,
+    /// We need to manually convert it because automatic, recursive conversion via From trait is not possible, it doing one level of conversions.
     fn to(self) -> crate::Error;
 
     /// Convert the variant error into the crate-level error if applicable,
@@ -132,78 +132,63 @@ impl ErrorExt for Error {
 
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
-        // NOTE: I think at this level we cannot respond with anything different that just 500.
-        // match self {
-        //     Error::Config(_) | Error::Database(_) | Error::Controller(_) | Error::Io(_) | Error::Other(_) => ,
-        //     Error::Database(error) => todo!(),
-        //     Error::Controller(error) => todo!(),
-        //     Error::Io(error) => todo!(),
-        //     Error::Other(error) => todo!(),
-        // };
-
-        // NOTE: I think at this level we cannot respond with anything different that just 500.
-
         return self.to_response(ErrorResponse::default());
     }
 }
 
-// NOTE: Snippet to hide the public API
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
 
-// // PublicError is public, but opaque and easy to keep compatible.
-// #[derive(Error, Debug)]
-// #[error(transparent)]
-// pub struct PublicError(#[from] ErrorRepr);
+//     #[cfg(test)]
+//     impl Error {
+//         /// Flattens the error chain to find the first occurrence of the specified error type `T`.
+//         /// For example, controller::Controller(controller::auth::Auth(DatabaseError { .. })) | DatabaseError {..} => crate::database
+//         ///
+//         /// `NOTE``: There are some challenges of implementing that correctly so I have decide to not do it,
+//         /// what if there are 2 errors of the same type in the chain?:
+//         ///
+//         /// `crate::Controller(controller::auth::Auth(GenericControllerError { source: Arc<<anyhow::Error>> }))` => `source` => `Auth::Invalid`
+//         /// There are 2 errors of the same type in the chain, which one to return? One is inside the `crate::Controller`, the other
+//         /// will get downcasted to the T from the `source` of the `GenericControllerError`.
+//         /// I figure there would have to be 2 separate methods,
+//         ///
+//         /// 1. One that recurses try to downcast each error while recursing
+//         ///
+//         /// 2. The other that downcasts post recursion, meaning from bottom to top and try to find the `T` type in the chain.
+//         pub fn flat<T: std::error::Error + 'static>(&self) -> Option<&T> {
+//             let mut current: &(dyn std::error::Error + 'static) = self;
 
-// impl PublicError {
-//     // Accessors for anything we do want to expose publicly.
-// }
+//             loop {
+//                 // Try downcasting the current error
+//                 if let Some(e) = current.downcast_ref::<T>() {
+//                     return Some(e);
+//                 }
 
-// // Private and free to change across minor version of the crate.
-// #[derive(Error, Debug)]
-// enum ErrorRepr {
-//     ...
-// }
+//                 // Error(controller::Controller(controller::auth::Auth(DatabaseError {..}))) | DatabaseError {..} => crate::database
+//                 // Error(crate::Controller(controller::auth::Auth(GenericControllerError { source: Arc<anyhow::Error> }))) => source => Auth::Invalid
+//                 // Auth::Invalid | controller::auth::Auth(GenericControllerError { .. }) => { source: Arc<anyhow::Error> } => anyhow::Error => Auth::Invalid
+//                 //
 
-// pub enum Error {
-//     Io(std::io::Error),
-//     DotEnv(dotenv::Error),
-// }
-
-// impl std::fmt::Debug for Error {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             Error::Io(e) => f.debug_tuple("Io").field(e).finish(),
-//             Error::DotEnv(e) => f.debug_tuple("DotEnv").field(e).finish(),
+//                 // Move to next source in the chain
+//                 match current.source() {
+//                     Some(src) => current = src,
+//                     None => return None,
+//                 }
+//             }
 //         }
 //     }
-// }
 
-// impl std::fmt::Display for Error {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             Error::Io(_) => write!(f, "I/O error occurred"),
-//             Error::DotEnv(_) => write!(f, "DotEnv error occurred"),
-//         }
-//     }
-// }
+//     #[test]
+//     fn test_flat() {
+//         let inner = crate::controller::auth::Error::AlreadyAuthenticated;
+//         let top = Error::Controller(crate::controller::Error::Auth(inner.clone()));
 
-// impl std::error::Error for Error {
-//     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-//         match self {
-//             Error::Io(e) => Some(e),
-//             Error::DotEnv(e) => Some(e),
-//         }
-//     }
-// }
+//         let f = top.flat::<crate::controller::auth::Error>();
 
-// impl From<std::io::Error> for Error {
-//     fn from(err: std::io::Error) -> Self {
-//         Error::Io(err)
-//     }
-// }
-
-// impl From<dotenv::Error> for Error {
-//     fn from(err: dotenv::Error) -> Self {
-//         Error::DotEnv(err)
+//         assert!(matches!(
+//             f,
+//             Some(crate::controller::auth::Error::AlreadyAuthenticated)
+//         ));
 //     }
 // }

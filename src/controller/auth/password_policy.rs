@@ -1,8 +1,7 @@
 // We are doing the module trick to isolate the const flags, which, bear with me, are useless.
-// We are not restricting any letters or symbols for the password, just enforcing some policies.
-// Although I am not sure if that is a good idea.
 
-// TODO: Port that to client-side.
+// We are not restricting any letters or symbols for the password, just enforcing some policies.
+
 const MIN_LENGTH: usize = 8;
 const MAX_LENGTH: usize = 128;
 const SPECIAL_CHARACTERS: &str = "!@#$%^&*()-+";
@@ -39,7 +38,7 @@ pub fn validate_password_policy(password: &str) -> bool {
             has_special = true;
         }
 
-        // Early exit if all requirements are met, size is already early satisfied .
+        // Early exit if all requirements are met, size is already early satisfied.
         if has_uppercase && has_lowercase && has_digit && has_special {
             return true;
         }
@@ -50,17 +49,13 @@ pub fn validate_password_policy(password: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::controller::auth::password_policy;
+    use crate::controller::auth::password_policy::{self};
 
     use super::validate_password_policy;
 
     #[test]
     fn test_password_policy() {
         let valid = "Password1!";
-        println!(
-            "{}",
-            valid.repeat(password_policy::MAX_LENGTH.div_ceil(valid.len()))
-        );
 
         assert!(validate_password_policy(valid));
         assert!(!validate_password_policy("weakpass"));
@@ -68,7 +63,9 @@ mod tests {
         assert!(!validate_password_policy("NoSpecialChar1"));
         assert!(!validate_password_policy("NOLOWERCASE1!"));
         assert!(!validate_password_policy("nouppercase1!"));
-        assert!(!validate_password_policy("NoDigit!"));
+        assert!(!validate_password_policy("NoDigitNoDigit!"));
+
+        // Greater than MAX_LENGTH
         assert!(!validate_password_policy(
             // 128 / 10 = 12.8 => 13 * 10 => 130 > 128
             &valid.repeat(password_policy::MAX_LENGTH.div_ceil(valid.len()))

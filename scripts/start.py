@@ -74,12 +74,6 @@ def start():
     # SERVER_URL, CLIENT_URL = envs.get("SERVER_URL"), envs.get("CLIENT_URL")
     SERVER_PORT, CLIENT_PORT = envs.get("SERVER_PORT"), envs.get("CLIENT_PORT")
 
-    print(f"SERVER_PORT: {SERVER_PORT}, CLIENT_PORT: {CLIENT_PORT}")
-    print(f"FRONTEND_PATH: {FRONTEND_PATH}")
-    print(
-        f"Start-Process powershell -WorkingDirectory {FRONTEND_PATH} -ArgumentList '-NoExit','-Command','npm run dev -- -p {CLIENT_PORT}'",
-    )
-
     #  Start server in a new PowerShell window
     subprocess.Popen(
         [

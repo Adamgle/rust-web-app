@@ -1,217 +1,54 @@
-// Integration tests for the config/mod.rs
-// TODO: We need to figure out a better way for structuring the integration tests
-// If I put the files in separate directories the analyzer does not link them.
-
-// #![allow(unused)]
-
-// Router::new()
-// .route("/auth/session", get(get_auth_session))
-// .route("/auth/register", post(register_user))
-// .route("/auth/login", post(login_user))
-// .route("/auth/logout", post(logout_user))
-
-// #[tokio::test]
-
-use std::sync::Arc;
-
 use anyhow::Context;
-use axum::{
-    body::Body,
-    http::{self, Method, Request, request::Builder},
-};
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::{Duration, Utc};
 use http_body_util::BodyExt;
 use reqwest::header;
 use rust_web_app::{
-    AppState, Error,
+    Error,
     controller::{
         self,
         auth::{self, ClientAuthenticationCredentials},
         cookies,
     },
-    database::types::{ClientUser, DatabaseAccount, DatabaseSession, DatabaseUser},
+    database::types::{ClientUser, DatabaseSession, DatabaseUser},
+};
+use sqlx::types::Uuid;
+use tower_cookies::Cookie;
+
+use crate::controller::auth::fixtures::{
+    AuthEndpoint, TestAuthPayload, TestAuthState, TestResponse,
 };
 
-use sqlx::types::Uuid;
-use tower::ServiceExt;
-use tracing::info;
+mod fixtures;
 
-#[derive(Debug)]
-struct TestRequest {
-    pool: sqlx::Pool<sqlx::Postgres>,
-    builder: Builder,
-}
+// NOTE: I won't fix those issues, because the code is doing what is supposed to, but given that it is my first integration testing code,
+// I would try to not repeat those mistakes in the future so just want to lay it down explicitly here.
 
-#[derive(Debug)]
-struct TestResponse {
-    // pool: sqlx::Pool<sqlx::Postgres>,
-    // app: Router,
-    response: http::Response<Body>,
-    error: Option<rust_web_app::Error>,
-}
-
-impl TestRequest {
-    fn new(pool: sqlx::Pool<sqlx::Postgres>, builder: Builder) -> Self {
-        Self { pool, builder }
-    }
-
-    async fn send<T>(self, payload: T) -> anyhow::Result<TestResponse>
-    where
-        T: serde::Serialize,
-    {
-        // NOTE: Maybe we should return that router.
-        let app = rust_web_app::app(AppState::new(self.pool)).await?;
-
-        let request = self
-            .builder
-            .body(Body::from(serde_json::to_string(&payload)?))?;
-
-        // This would give you the response after serialization.
-        let response = app.oneshot(request).await?;
-        let error = response
-            .extensions()
-            .get::<Arc<rust_web_app::Error>>()
-            // We can afford that clone when testing.
-            .map(|e| e.as_ref().clone());
-
-        Ok(TestResponse { response, error })
-    }
-}
-
-/// It helps to have reproducible Request Builder setups for different auth endpoints.
-///
-/// We can think about doing something like that for each controller module.
-enum AuthEndpoint {
-    Register,
-    Login,
-    Logout,
-    Session,
-}
-
-impl AuthEndpoint {
-    const EMAIL: &'static str = "first@email.com";
-    const PASSWORD: &'static str = "Password1!";
-
-    /// Builds default test request for the given builder, returning a `TestRequest` that contain
-    /// that builder so it can be modified .
-    fn build(&self, pool: sqlx::Pool<sqlx::Postgres>) -> TestRequest {
-        match self {
-            Self::Register => TestRequest::new(
-                pool,
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/api/v1/auth/register")
-                    .header(header::CONTENT_TYPE, "application/json"),
-            ),
-            Self::Login => TestRequest::new(
-                pool,
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/api/v1/auth/login")
-                    .header(header::CONTENT_TYPE, "application/json"),
-            ),
-            Self::Logout => TestRequest::new(
-                pool,
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/api/v1/auth/logout"),
-            ),
-            Self::Session => TestRequest::new(
-                pool,
-                Request::builder()
-                    .method(Method::GET)
-                    .uri("/api/v1/auth/session"),
-            ),
-        }
-    }
-
-    // NOTE: That is an overkill and strictly wrong as it repeats code inside the variant,
-    // but I prefer this instead of ambiguous payload being returned for different endpoints.
-    //
-    // Also, it only wastes 1 bytes of memory so who cares.
-    fn payload(&self) -> TestAuthPayload {
-        match self {
-            AuthEndpoint::Register => TestAuthPayload::Register(ClientAuthenticationCredentials {
-                email: Self::EMAIL.to_string(),
-                password: Self::PASSWORD.to_string(),
-            }),
-            AuthEndpoint::Login => TestAuthPayload::Login(ClientAuthenticationCredentials {
-                email: Self::EMAIL.to_string(),
-                password: Self::PASSWORD.to_string(),
-            }),
-            _ => unimplemented!(),
-        }
-    }
-
-    /// Creates the state of the database after the endpoint is called and succeeds.
-    ///
-    /// For example, for registration it would create the account, user and session in the database.
-    async fn create(&self, pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<TestAuthState> {
-        match self {
-            Self::Register => {
-                // Create dummy session, user and account  in the database to fill the cookies with ssid.
-                let account = sqlx::query_as!(
-                    DatabaseAccount,
-                    "INSERT INTO accounts (created_at) VALUES (DEFAULT) RETURNING *"
-                )
-                .fetch_one(&pool)
-                .await?;
-
-                let TestAuthPayload::Register(ClientAuthenticationCredentials { email, password }) =
-                    self.payload()
-                else {
-                    panic!("Expected Register payload variant");
-                };
-
-                let password = auth::hash_password(&password)?;
-                let user = sqlx::query_as!(
-                    DatabaseUser,
-                    "INSERT INTO users (email, password_hash, account_id)
-                    VALUES ($1, $2, $3) RETURNING *",
-                    email,
-                    password,
-                    account.id
-                )
-                .fetch_one(&pool)
-                .await?;
-
-                let session = sqlx::query_as!(
-                    DatabaseSession,
-                    "INSERT INTO sessions (user_id) VALUES ($1) RETURNING *",
-                    user.id
-                )
-                .fetch_one(&pool)
-                .await?;
-
-                Ok(TestAuthState::Register {
-                    user,
-                    account,
-                    session,
-                })
-            }
-            _ => unimplemented!(),
-        }
-    }
-}
-
-/// This represent the state of the database after each endpoint is called and succeeds.
-/// Some endpoints are not changing the database state so we will not respect them here.s
-enum TestAuthState {
-    // Represents the state after a successful user registration.
-    // May be used elsewhere in tests to register a user without triggering the endpoint.
-    Register {
-        user: DatabaseUser,
-        account: DatabaseAccount,
-        session: DatabaseSession,
-    },
-}
-
-enum TestAuthPayload {
-    Register(ClientAuthenticationCredentials),
-    Login(ClientAuthenticationCredentials),
-}
-
-const EMAIL: &str = "second@email.com";
+// What I do not like about this integration tests and the code in general.
+// 1. <FIXED> AuthEndpoint::EMAIL and AuthEndpoint::PASSWORD are not private and accessible from outside.
+//  -> that is not a big issue because it is easily fixable, but you may duplicate the addresses and got an error which
+//  -> you did not asserted for, on the other hand, when you are asserting for duplicated email you would want to add to the database
+//  -> user with the same email, and you would need access to that constant, of course there are other ways to reproduce that error.
+//  -> I thought maybe I will assert that the Email declared on the struct is not the same as the oen in payload, but then
+//  -> you would not be able to test for TakenEmail as assertion would not pass.
+//      => <FIXED> Created `fixtures` module.
+// 2. `AuthEndpoint::payload` is repetitive, thought provide strict meaning.
+// 3. I don't imagine the test fixtures here to be always irrefutable, meaning not for each test each fixture must exists,
+//  -> but some of the API here is left unimplemented and can be found used in ambiguous way, that may lead to confusion,
+//  -> for example, AuthEndpoint::Register.create() is used many times, not even in that endpoint as it just create the database
+//  -> state for registration, and it might be useful in many tests. On the other hand it is explicitly defined what it is doing,
+//  -> but might be confusing when used for other endpoints, maybe that should just be a separate function, separate from the struct, that
+//  -> create the database state for the registration, not tied to anything the endpoint is doing.
+// 4. `AuthEndpoint::create` is ambiguous, the naming does not reflect anything, you have to read the comments and code to understand.
+// 5. <FIXED>There is one constant in the module `EMAIL` representing different email address that the one used in the AuthEndpoint::EMAIL,
+//  -> the constant is not explicit and not clearly states what it is used for.
+//      => <FIXED> Created `fixtures` module.
+// 6. The file should be splitted per endpoint I suppose, not sure about that, that may be an overkill, but tests here are
+//  -> structured per name, like each test first 2 words are describing the endpoint, and we should just move them to separate files.
+//  -> thought not sure if at this scale it is worthwhile.
+// 7. The way we build cookies by manually constructing the header value is error prone, we should
+//  -> use some cookies crate to build cookies properly, also there may be some inconsistencies with using
+//  -> literals for cookies names and consts.
 
 #[sqlx::test(migrations = "./migrations")]
 #[tracing_test::traced_test]
@@ -224,8 +61,7 @@ async fn test_register_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result
 
     let endpoint = AuthEndpoint::Register;
 
-    let request = endpoint.build(pool);
-    let pool = request.pool.clone();
+    let request = endpoint.build(&pool);
 
     let TestAuthPayload::Register(payload) = endpoint.payload() else {
         panic!("Expected Register payload variant");
@@ -287,7 +123,7 @@ async fn test_register_already_authenticated(
     let TestAuthState::Register {
         session: DatabaseSession { id, .. },
         ..
-    } = AuthEndpoint::Register.create(pool.clone()).await?;
+    } = AuthEndpoint::Register.create(&pool).await?;
 
     let TestAuthPayload::Register(payload) = AuthEndpoint::Register.payload() else {
         panic!("Expected Register payload variant");
@@ -295,7 +131,7 @@ async fn test_register_already_authenticated(
 
     let ssid = auth::create_ssid_cookie(id)?.to_string();
 
-    let mut request = AuthEndpoint::Register.build(pool.clone());
+    let mut request = AuthEndpoint::Register.build(&pool);
     request.builder = request.builder.header(header::COOKIE, ssid);
 
     let TestResponse {
@@ -318,11 +154,11 @@ async fn test_register_already_authenticated(
 async fn test_register_password_requirement(
     pool: sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<()> {
-    let request = AuthEndpoint::Register.build(pool);
+    let request = AuthEndpoint::Register.build(&pool);
 
     // Test with weak password
     let payload = ClientAuthenticationCredentials {
-        email: self::EMAIL.to_string(),
+        email: fixtures::EMAIL.to_string(),
         password: "weak".to_string(),
     };
 
@@ -347,21 +183,16 @@ async fn test_register_password_requirement(
 #[tracing_test::traced_test]
 async fn test_register_email_taken(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     // Fill database with user having the email.
-    let TestAuthState::Register {
-        user: DatabaseUser { email, .. },
-        ..
-    } = AuthEndpoint::create(&AuthEndpoint::Register, pool.clone()).await?;
+    let TestAuthState::Register { .. } =
+        AuthEndpoint::create(&AuthEndpoint::Register, &pool).await?;
 
-    // Run registration with the same email.
-    let payload = ClientAuthenticationCredentials {
-        email,
-        password: AuthEndpoint::PASSWORD.to_string(),
+    // We are using the same credentials as the ones for the first registration above.
+    let TestAuthPayload::Register(payload) = AuthEndpoint::payload(&AuthEndpoint::Register) else {
+        panic!("Expected Register payload variant");
     };
 
-    let TestResponse { response, error } = AuthEndpoint::Register
-        .build(pool.clone())
-        .send(payload)
-        .await?;
+    let TestResponse { response, error } =
+        AuthEndpoint::Register.build(&pool).send(payload).await?;
 
     assert!(error.is_some());
     assert!(response.status().is_client_error());
@@ -387,7 +218,7 @@ async fn test_register_database_disconnected(
     let TestAuthPayload::Register(payload) = AuthEndpoint::payload(&endpoint) else {
         panic!("Expected Register payload variant");
     };
-    let TestResponse { response, error } = endpoint.build(pool).send(payload).await?;
+    let TestResponse { response, error } = endpoint.build(&pool).send(payload).await?;
 
     assert!(error.is_some());
     assert!(response.status().is_server_error());
@@ -402,16 +233,63 @@ async fn test_register_database_disconnected(
 
 #[sqlx::test]
 #[tracing_test::traced_test]
+async fn test_register_same_password_different_hash(
+    pool: sqlx::Pool<sqlx::Postgres>,
+) -> anyhow::Result<()> {
+    let TestAuthState::Register { user, .. } =
+        AuthEndpoint::create(&AuthEndpoint::Register, &pool).await?;
+
+    // Use default payload as the one used when creating the user above but with different email.
+    let TestAuthPayload::Register(mut payload) = AuthEndpoint::payload(&AuthEndpoint::Register)
+    else {
+        panic!("Expected Register payload variant");
+    };
+
+    // Assert that payload contains the same password as the one created above.
+    assert!(
+        Argon2::default()
+            .verify_password(
+                payload.password.as_bytes(),
+                &PasswordHash::new(&user.password_hash)?
+            )
+            .is_ok()
+    );
+
+    // Change email to not taken
+    payload.email = fixtures::EMAIL.to_string();
+
+    let TestResponse { response, error } =
+        AuthEndpoint::Register.build(&pool).send(payload).await?;
+
+    assert!(error.is_none());
+    assert!(response.status().is_success());
+
+    let registered_user = sqlx::query_as!(
+        DatabaseUser,
+        "SELECT * FROM users WHERE email = $1",
+        fixtures::EMAIL
+    )
+    .fetch_one(&pool)
+    .await
+    .context("Registered user does not exists in the database.")?;
+
+    assert!(registered_user.password_hash != user.password_hash);
+
+    Ok(())
+}
+
+#[sqlx::test]
+#[tracing_test::traced_test]
 async fn test_session_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     let TestAuthState::Register {
         session: DatabaseSession { id, .. },
         user: DatabaseUser { id: user_id, .. },
         ..
-    } = AuthEndpoint::Register.create(pool.clone()).await?;
+    } = AuthEndpoint::Register.create(&pool).await?;
 
     let ssid = auth::create_ssid_cookie(id)?.to_string();
 
-    let mut request = AuthEndpoint::Session.build(pool.clone());
+    let mut request = AuthEndpoint::Session.build(&pool);
     request.builder = request.builder.header(header::COOKIE, ssid);
 
     let TestResponse { response, error } = request.send(()).await?;
@@ -429,11 +307,16 @@ async fn test_session_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<
 
 #[sqlx::test]
 #[tracing_test::traced_test]
-async fn test_session_invalid_uuid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
-    let mut request = AuthEndpoint::Session.build(pool.clone());
-    request.builder = request
-        .builder
-        .header(header::COOKIE, "SSID=invalid-uuid-format");
+async fn test_session_invalid_ssid_cookie(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
+    let mut request = AuthEndpoint::Session.build(&pool);
+    request.builder = request.builder.header(
+        header::COOKIE,
+        format!(
+            "{}=invalid-uuid-format{}<HMAC_SIGNATURE>",
+            cookies::SSID,
+            cookies::SSID_SEPARATOR
+        ),
+    );
 
     let TestResponse {
         error: Some(error), ..
@@ -462,7 +345,7 @@ async fn test_session_session_expired(pool: sqlx::Pool<sqlx::Postgres>) -> anyho
         session: DatabaseSession { id: session_id, .. },
         user: DatabaseUser { id: user_id, .. },
         ..
-    } = AuthEndpoint::Register.create(pool.clone()).await?;
+    } = AuthEndpoint::Register.create(&pool).await?;
 
     // Update the session to be expired (set expires_at to past date)
     let expired = Utc::now().naive_utc() - Duration::days(8);
@@ -479,7 +362,7 @@ async fn test_session_session_expired(pool: sqlx::Pool<sqlx::Postgres>) -> anyho
 
     let ssid = auth::create_ssid_cookie(session_id)?.to_string();
 
-    let mut request = AuthEndpoint::Session.build(pool.clone());
+    let mut request = AuthEndpoint::Session.build(&pool);
     request.builder = request.builder.header(header::COOKIE, ssid);
 
     let TestResponse {
@@ -519,7 +402,7 @@ async fn test_session_missing_session_in_database(
     let TestAuthState::Register {
         session: DatabaseSession { id, .. },
         ..
-    } = AuthEndpoint::Register.create(pool.clone()).await?;
+    } = AuthEndpoint::Register.create(&pool).await?;
 
     let ssid = auth::create_ssid_cookie(id)?.to_string();
 
@@ -530,7 +413,7 @@ async fn test_session_missing_session_in_database(
 
     assert!(result.rows_affected() == 1);
 
-    let mut request = AuthEndpoint::Session.build(pool.clone());
+    let mut request = AuthEndpoint::Session.build(&pool);
 
     // Session is removed from the database but cookie still persists.
     request.builder = request.builder.header(header::COOKIE, ssid);
@@ -561,7 +444,7 @@ async fn test_session_removed_when_user_removed(
         session: DatabaseSession { id: session_id, .. },
         user: DatabaseUser { id: user_id, .. },
         ..
-    } = AuthEndpoint::Register.create(pool.clone()).await?;
+    } = AuthEndpoint::Register.create(&pool).await?;
 
     // Remove the user from the database to simulate missing user
     let result = sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
@@ -590,7 +473,7 @@ async fn test_login_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()
     let TestAuthState::Register {
         user: DatabaseUser { id: user_id, .. },
         ..
-    } = AuthEndpoint::Register.create(pool.clone()).await?;
+    } = AuthEndpoint::Register.create(&pool).await?;
 
     // The payload is the same as the one when creating above as that is from the constant.
     let TestAuthPayload::Login(payload) = AuthEndpoint::Login.payload() else {
@@ -607,7 +490,7 @@ async fn test_login_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()
     .await
     .context("User for login does not exist in the database.")?;
 
-    let request = AuthEndpoint::Login.build(pool.clone());
+    let request = AuthEndpoint::Login.build(&pool);
 
     // Check that there are no cookies in the builder;
 
@@ -623,22 +506,21 @@ async fn test_login_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()
 
     assert!(ssid.is_some());
 
-    let ssid = ssid.unwrap().to_str()?.to_string();
-    let (ssid, ssid_options) = ssid.split_once("; ").unwrap_or_default();
+    let cookie = Cookie::parse(ssid.unwrap().to_str()?)?;
 
-    let ssid = ssid
-        .strip_prefix(format!("{}=", cookies::SSID).as_str())
-        .context("SSID cookie is missing the 'ssid=' prefix.")?
-        .to_string();
+    let c = cookie.to_string();
+    let (_, cookie_options) = c.split_once("; ").unwrap_or_default();
 
-    let default_cookie = auth::create_ssid_cookie(ssid.clone())?.to_string();
+    let ssid = auth::parse_ssid_cookie(cookie)
+        .context("Failed to parse SSID cookie from the Set-Cookie header.")?;
+
+    let default_cookie = auth::create_ssid_cookie(ssid)?.to_string();
     let default_cookie_options = default_cookie
         .split_once("; ")
         .map(|(_, options)| options)
         .unwrap_or_default();
 
-    assert!(ssid == ssid);
-    assert!(ssid_options == default_cookie_options);
+    assert_eq!(cookie_options, default_cookie_options);
 
     sqlx::query_as!(
         DatabaseSession,
@@ -658,7 +540,7 @@ async fn test_login_already_authenticated(pool: sqlx::Pool<sqlx::Postgres>) -> a
     let TestAuthState::Register {
         session: DatabaseSession { id, .. },
         ..
-    } = AuthEndpoint::Register.create(pool.clone()).await?;
+    } = AuthEndpoint::Register.create(&pool).await?;
 
     let TestAuthPayload::Register(payload) = AuthEndpoint::Register.payload() else {
         panic!("Expected Register payload variant");
@@ -666,7 +548,7 @@ async fn test_login_already_authenticated(pool: sqlx::Pool<sqlx::Postgres>) -> a
 
     let ssid = auth::create_ssid_cookie(id)?.to_string();
 
-    let mut request = AuthEndpoint::Register.build(pool.clone());
+    let mut request = AuthEndpoint::Register.build(&pool);
     request.builder = request.builder.header(header::COOKIE, ssid);
 
     let TestResponse {
@@ -690,12 +572,12 @@ async fn test_logout_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<(
     let TestAuthState::Register {
         session: DatabaseSession { id, .. },
         ..
-    } = AuthEndpoint::Register.create(pool.clone()).await?;
+    } = AuthEndpoint::Register.create(&pool).await?;
 
-    let ssid = auth::create_ssid_cookie(id)?.to_string();
+    let cookie = auth::create_ssid_cookie(id)?;
 
-    let mut request = AuthEndpoint::Logout.build(pool.clone());
-    request.builder = request.builder.header(header::COOKIE, ssid);
+    let mut request = AuthEndpoint::Logout.build(&pool);
+    request.builder = request.builder.header(header::COOKIE, cookie.to_string());
 
     sqlx::query!("SELECT * FROM sessions WHERE id = $1", id)
         .fetch_one(&pool)
@@ -713,8 +595,8 @@ async fn test_logout_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<(
 #[sqlx::test]
 #[tracing_test::traced_test]
 async fn test_logout_invalid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
-    let TestAuthState::Register { .. } = AuthEndpoint::Register.create(pool.clone()).await?;
-    let mut request = AuthEndpoint::Logout.build(pool.clone());
+    let TestAuthState::Register { .. } = AuthEndpoint::Register.create(&pool).await?;
+    let mut request = AuthEndpoint::Logout.build(&pool);
 
     // Cookie contains non-existent ssid.
     request.builder = request
@@ -732,13 +614,70 @@ async fn test_logout_invalid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result
     // and each variant of the error is wrapped in the ClientError indicating that the client request is invalid
     // and the same error message is sent across inner variants of the source of ClientError.
 
+    // let mut e: Option<std::sync::Arc<auth::Error>> = None;
+
+    // assert!(matches!(
+    //     error,
+    //     Error::Controller(controller::Error::Auth(auth::Error::GenericControllerError(
+    //         controller::GenericControllerError::ClientError { source: Some(ref source) },
+    //     )))
+    //     if source.downcast_ref::<auth::Error>().map(|arc| {
+    //         e = Some(arc.clone().into())
+    //     }).is_some()
+    // ));
+
+    // assert!(matches!(
+    //     error.flat::<GenericControllerError>(),
+    //     Some(GenericControllerError::ClientError { .. })
+    // ));
+
     assert!(matches!(
         error,
-        Error::Controller(controller::Error::Auth(auth::Error::ClientError { .. }))
+        Error::Controller(controller::Error::Auth(
+            auth::Error::GenericControllerError(
+                controller::GenericControllerError::ClientError { .. }
+            )
+        ))
     ));
 
-    // Other variants of this endpoint are not even testable, as error they are practically unreachable,
+    // Other variants of this endpoint are not even testable, as their errors are practically unreachable,
     // but still I have defined the errors for them, maybe I should just unwrap.
+
+    Ok(())
+}
+
+#[sqlx::test]
+#[tracing_test::traced_test]
+fn test_register_hmac_signature(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
+    let TestAuthPayload::Register(payload) = AuthEndpoint::Register.payload() else {
+        panic!("Expected Register payload variant");
+    };
+
+    let request = AuthEndpoint::Register.build(&pool);
+
+    let TestResponse { response, error } = request.send(payload).await?;
+
+    assert!(error.is_none());
+    assert!(response.status().is_success());
+
+    // Look up the Set-Cookie header to verify HMAC signature generation.
+    // TODO: That is not single ssid cookie, it's full Set-Cookie header that should be parsed and will yield errors
+    // if more cookies are present.
+    let ssid_cookie = response.headers().get(header::SET_COOKIE);
+    assert!(ssid_cookie.is_some());
+
+    let ssid_cookie = Cookie::parse(ssid_cookie.unwrap().to_str()?)?;
+
+    // It would verify the HMAC signature inside the cookie.
+    auth::parse_ssid_cookie(ssid_cookie)?;
+
+    Ok(())
+}
+
+#[test]
+/// Tests whether HMAC key is of valid size.
+fn test_valid_hmac_key() -> anyhow::Result<()> {
+    auth::generate_hmac_mac(&[]).context("Invalid key in the .env")?;
 
     Ok(())
 }

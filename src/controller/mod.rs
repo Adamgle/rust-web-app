@@ -3,6 +3,7 @@ mod error;
 pub mod stocks;
 
 pub use error::Error;
+pub use error::GenericControllerError;
 
 /// General API response types
 pub mod types {
@@ -21,6 +22,7 @@ pub mod types {
 /// Cookie names used across the application, maybe they should also map to a value type.
 pub mod cookies {
     pub const SSID: &str = "SSID";
+    pub const SSID_SEPARATOR: &str = ".";
 }
 
 // I do not see the use of Result from the controller module itself.

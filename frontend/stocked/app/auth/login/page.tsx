@@ -71,7 +71,6 @@ const handleLogin: LoginPageProps["onSubmit"] = async (e) => {
 
     return data;
   } catch (error) {
-    // TODO: I don't know what happens here, that coercion is probably unsafe.
     console.error(error);
 
     throw error;

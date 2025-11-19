@@ -9,9 +9,6 @@ use std::sync::Arc;
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum Error {
-    // TODO: Possibly the naming of the variant could be better, we care about readability, not the type of the error, but since
-    // we don't care about defining every possible error of the dotenv crate, it might be fine to just wrap the inner error of the crate
-    // in a variant, and then we can just infer from the error what happen.
     #[error(transparent)]
     Env(#[from] EnvError),
     #[error(transparent)]

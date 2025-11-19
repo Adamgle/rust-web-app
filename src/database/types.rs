@@ -59,3 +59,18 @@ impl From<DatabaseUser> for ClientUser {
         }
     }
 }
+
+// https://docs.rs/sqlx/latest/sqlx/postgres/types/index.html#types
+#[derive(serde::Serialize)]
+
+// TODO: Delegate the database schemas to separate module/file.
+pub struct Stock {
+    pub id: i32, // That should be unsigned, but it fails converting to u32, as postgres does not have unsigned, like a [1, 2^31 - 1]
+    pub abbreviation: String,
+    pub company: String,
+    pub since: chrono::NaiveDate, // DATE
+    pub price: f32,
+    pub delta: f32,
+    pub last_update: chrono::NaiveDate, // TIMESTAMP
+    pub created_at: chrono::NaiveDate,  // TIMESTAMP
+}

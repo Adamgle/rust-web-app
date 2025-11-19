@@ -266,7 +266,7 @@ into something that you can draw a conclusion from. That would require:
      -> Mathematical knowledge, 
      -> Economics,
      -> Probably something advanced like machine learning algorithms or mathematical finance, thought something fairly
-          simple like regression model could be used.
+          simple like regression model could be used though most certainly would not be useful.
      -> much more, ...
 
 Main idea is to trade with other, and simulate the trading game, the next steps I feel like should be:
@@ -300,33 +300,37 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
           CSRF protection should be implemented. 
           To make it even remotely secure the service should be accessible via TLS secure layer.
 
-### THIS MUST BE AT THE END OF THE DOCUMENT #
-### WE'RE STARTING A PROCESS, AND ONGOING PROCESS:
-=> <ABORTED> Get data for the stock market, that would be 
--> Stock market history, the broader time frame, the better.
-     => <ABORTED> -> We are focusing on the technical details from now on and then eventually 
-          -> get involved in the actual data processing of the real world, if any.
 
 ### ISSUES
-1. Logger does not work as I have changed something while implementing tokio-console in the logger module.
-2. I don't know how to capture the error in the request chain but just log then in the place where they have happened.
+1. <FIXED> Logger does not work as I have changed something while implementing tokio-console in the logger module.
+2. <FIXED> I don't know how to capture the error in the request chain but just log then in the place where they have happened.
      Specifically when the error of missing sessions happens, first it is not logged to stdout and the associated
      error of the thiserror macro attribute is not invoked.
-3. ErrorResponse struct is not treated as an actual response, we need to find out how to make it recognize as a response.
+3. <FIXED> ErrorResponse struct is not treated as an actual response, we need to find out how to make it recognize as a response.
 4. Main authentication login is finished but there are a lot to consider:
      1. No CSRF protection for SSID cookies.
      2. Taken emails are enumerated during registration logic, although that is kind off by design, thought maybe I should change the design.
      3. No timing attacks protection that could disclose information like email existence, although it is transparent here, should be protected. 
      4. Cookies needs to be signed, as currently client can enumerate all uuid, although that is infeasible to brute-force, but would prevent
-          querying the database as it would be early detected as forged and malformed.
+          querying the database as it would be early detected as forged and malformed by the client.
           We would hold some single secret server-side, verify if the cookie is valid given that key and then precede with the request or abort early.
+          <SIGNATURE>.<SSID>
      5. Errors that occur, client and server-side are not stored anywhere, I would like to able to hold the client errors in some kind of Postgres table
           as a JSON type thought I need to explore that, surely it would be unstructured logs, or semi-structure.
 5. Payloads are not restricted to size
 6. 
 
 ### TODO:
-Writing tests for controller::auth
-     -> fn create_ssid_cookie<T: TryInto<Uuid>>(ssid: T) -> self::Result<Cookie<'static>>
-          Test for invalid ssid, valid ssid, 
-     -> 
+<ABORTED> Get data for the stock market, that would be Stock market history,
+     the broader time frame, the better.
+     <ABORTED> 
+          We are focusing on the technical details from now on and then eventually 
+          get involved in the actual data processing of the real world, if any.
+<DONE> Writing tests for controller::auth
+<DONE> Sign the SSID cookie with HMAC.
+     <UPDATE>
+          I think we should just use the SignedJar from `cookies` re-exported by `tower-cookies` crate.
+<TODO> Learn how the edge runtime in Next.js works and figure out should I host the frontend to Vercel if I would use it,
+     and I am using it in proxy.ts for early redirection.
+<TODO> I am sometimes displaying errors in middleware that are sometimes wrapped in anyhow so they get displayed
+     like their string representation, check if I can downcast them somehow to actual types for better debugging.

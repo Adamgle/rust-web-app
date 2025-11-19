@@ -58,8 +58,5 @@ export function getSessionUser(): {
   // when that condition will repeatedly comply
   if (!isLoading && !data) throw new Error("Failed to fetch auth session");
 
-  // TODO: user needs to be validated against the database.
-  // UPDATE: no
-
   return { data, error: undefined, mutate };
 }

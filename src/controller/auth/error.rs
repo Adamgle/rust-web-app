@@ -1,12 +1,14 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use crate::controller;
 use crate::error::ErrorResponse;
 
 use crate::error::ErrorExt;
-use axum::response::IntoResponse;
+use axum::{http::StatusCode, response::IntoResponse};
 
 #[derive(thiserror::Error, Debug, Clone)]
+#[error("Internal Server Error")]
 pub enum Error {
     #[error(transparent)]
     DatabaseError(#[from] crate::database::Error),
@@ -19,15 +21,21 @@ pub enum Error {
         ssid: Option<String>,
         source: Arc<anyhow::Error>,
     },
+    #[error("Invalid ssid cookie")]
+    InvalidSessionCookieWrongFormat {
+        ssid: Option<String>,
+    },
+    #[error("Invalid ssid cookie")]
+    InvalidSessionCookieHmacVerificationFailed {
+        ssid: Option<String>,
+        source: Arc<anyhow::Error>,
+    },
     #[error("Session expired at: {0}")]
     SessionExpired(String),
-    // #[error("User not found")]
-    // UserNotFound,
     #[error("Weak password does not meet the policy requirements: {0}")]
     PasswordRequirementsNotMet(String),
     // NOTE: We are not leaking the inner error message to avoid leaking sensitive information,
     // but it will be logged in the middleware on the server-side if one occur.
-    #[error("Internal Server Error")]
     PasswordHashError(#[from] argon2::password_hash::Error),
     #[error("Email already taken: {0}")]
     EmailTaken(String),
@@ -38,77 +46,36 @@ pub enum Error {
         #[source]
         source: Option<Arc<anyhow::Error>>,
     },
-    // That would be general purpose, catch all variant for client errors when we do not want to send any specific reason
-    // for the failure, but do want to save the source of the error in variant for logging purposes.
-    #[error("Internal Server Error")]
-    ClientError {
-        #[source]
-        source: Option<Arc<anyhow::Error>>,
-    },
-    #[error("Internal Server Error")]
+    GenericControllerError(#[from] controller::GenericControllerError),
+    Config(#[from] crate::config::Error),
+    // Other would be tried as Internal Server Error that takes the error for later logging, something that do not need the separate variant.
     Other(#[from] Arc<anyhow::Error>),
 }
 
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
         let message = Cow::Owned(self.to_string());
-
-        // This should not leak sensitive information.
-        let representation = match self {
-            Error::MissingSessionCookie => ErrorResponse {
-                status: axum::http::StatusCode::UNAUTHORIZED,
-                message,
-            },
-            Error::DatabaseError(_) => ErrorResponse {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message,
-            },
-            Error::MissingSessionInDatabase => ErrorResponse {
-                status: axum::http::StatusCode::UNAUTHORIZED,
-                message,
-            },
-            Error::InvalidSessionCookieWrongUuidFormat { .. } => ErrorResponse {
-                status: axum::http::StatusCode::UNAUTHORIZED,
-                message,
-            },
-            Error::SessionExpired(_) => ErrorResponse {
-                status: axum::http::StatusCode::UNAUTHORIZED,
-                message,
-            },
-            Error::PasswordRequirementsNotMet(_) => ErrorResponse {
-                status: axum::http::StatusCode::BAD_REQUEST,
-                message,
-            },
-            Error::PasswordHashError(_) => ErrorResponse {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                // We are not using the display trait for the error as that contains sensitive information.
-                // NOTE: I do not think that is the best way to do it, the display trait method
-                // should not contain sensitive information in the first place.
-                message,
-            },
-            Error::EmailTaken(_) => ErrorResponse {
-                status: axum::http::StatusCode::CONFLICT,
-                message,
-            },
-            Error::AlreadyAuthenticated => ErrorResponse {
-                status: axum::http::StatusCode::BAD_REQUEST,
-                message,
-            },
-            Error::InvalidCredentials { .. } => ErrorResponse {
-                status: axum::http::StatusCode::BAD_REQUEST,
-                message,
-            },
-            Error::ClientError { .. } => ErrorResponse {
-                status: axum::http::StatusCode::BAD_REQUEST,
-                message,
-            },
-            Error::Other(_) => ErrorResponse {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message,
-            },
+        let status = match self {
+            Error::MissingSessionCookie => StatusCode::UNAUTHORIZED,
+            Error::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::MissingSessionInDatabase => StatusCode::UNAUTHORIZED,
+            Error::InvalidSessionCookieWrongUuidFormat { .. } => StatusCode::UNAUTHORIZED,
+            Error::InvalidSessionCookieHmacVerificationFailed { .. } => StatusCode::UNAUTHORIZED,
+            Error::InvalidSessionCookieWrongFormat { .. } => StatusCode::UNAUTHORIZED,
+            Error::SessionExpired(_) => StatusCode::UNAUTHORIZED,
+            Error::PasswordRequirementsNotMet(_) => StatusCode::BAD_REQUEST,
+            Error::PasswordHashError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::EmailTaken(_) => StatusCode::CONFLICT,
+            Error::AlreadyAuthenticated => StatusCode::BAD_REQUEST,
+            Error::InvalidCredentials { .. } => StatusCode::BAD_REQUEST,
+            Error::Other(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::Config(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::GenericControllerError(ref generic_controller_error) => {
+                generic_controller_error.clone().into_response().status()
+            }
         };
 
-        return self.to_response(representation);
+        return self.to_response(ErrorResponse { message, status });
     }
 }
 
