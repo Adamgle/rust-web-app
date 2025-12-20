@@ -4,7 +4,6 @@ import Link from "next/link";
 import { getSessionUser } from "../../api/hooks/getAuthSessions";
 import { ApiStatusResponse } from "../../api/hooks/useFetch";
 import { fetcher } from "../../utils/fetcher";
-import { useSWRConfig } from "swr";
 
 const handleLogout = async (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
@@ -30,7 +29,9 @@ export function LoginButton() {
 }
 
 export function Profile() {
-  // This causes flicker as that is client side render.
+  // This causes flicker as that is client side render, it would have to be server-rendered to not to,
+  // but that would require edge runtime on Next.js.
+
   const { data, error, mutate } = getSessionUser();
 
   if (!data || error) {

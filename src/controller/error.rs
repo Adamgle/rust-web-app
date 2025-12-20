@@ -28,7 +28,6 @@ pub enum Error {
 /// things that went bad because client does not adhere to the application layer rules.
 ///
 /// I think each of the variant will have it's display message to be Internal Server Error or Bad Request, to be determined.
-/// Those errors are really
 #[derive(thiserror::Error, Debug, Clone)]
 #[error("Internal Server Error")]
 pub enum GenericControllerError {

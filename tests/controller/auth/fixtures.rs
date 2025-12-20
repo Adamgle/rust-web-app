@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    http::{self, Method, Request, request::Builder},
+    http::{self, Method, Request, header, request::Builder},
 };
-use reqwest::header;
 use rust_web_app::{
     AppState,
     controller::auth::{self, ClientAuthenticationCredentials},

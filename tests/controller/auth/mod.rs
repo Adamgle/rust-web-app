@@ -1,8 +1,8 @@
 use anyhow::Context;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
+use axum::http::header;
 use chrono::{Duration, Utc};
 use http_body_util::BodyExt;
-use reqwest::header;
 use rust_web_app::{
     Error,
     controller::{
@@ -40,7 +40,7 @@ mod fixtures;
 //  -> but might be confusing when used for other endpoints, maybe that should just be a separate function, separate from the struct, that
 //  -> create the database state for the registration, not tied to anything the endpoint is doing.
 // 4. `AuthEndpoint::create` is ambiguous, the naming does not reflect anything, you have to read the comments and code to understand.
-// 5. <FIXED>There is one constant in the module `EMAIL` representing different email address that the one used in the AuthEndpoint::EMAIL,
+// 5. <FIXED> There is one constant in the module `EMAIL` representing different email address that the one used in the AuthEndpoint::EMAIL,
 //  -> the constant is not explicit and not clearly states what it is used for.
 //      => <FIXED> Created `fixtures` module.
 // 6. The file should be splitted per endpoint I suppose, not sure about that, that may be an overkill, but tests here are
@@ -51,7 +51,6 @@ mod fixtures;
 //  -> literals for cookies names and consts.
 
 #[sqlx::test(migrations = "./migrations")]
-#[tracing_test::traced_test]
 async fn test_register_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     // To test the registration flow we need to:
     // 1. Check for each variant of the error that can happen during registration.
@@ -116,7 +115,6 @@ async fn test_register_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result
 // and then single test asserts they're outcome.
 
 #[sqlx::test(migrations = "./migrations")]
-#[tracing_test::traced_test]
 async fn test_register_already_authenticated(
     pool: sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<()> {
@@ -150,7 +148,6 @@ async fn test_register_already_authenticated(
 }
 
 #[sqlx::test(migrations = "./migrations")]
-#[tracing_test::traced_test]
 async fn test_register_password_requirement(
     pool: sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<()> {
@@ -180,7 +177,6 @@ async fn test_register_password_requirement(
 }
 
 #[sqlx::test(migrations = "./migrations")]
-#[tracing_test::traced_test]
 async fn test_register_email_taken(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     // Fill database with user having the email.
     let TestAuthState::Register { .. } =
@@ -206,7 +202,6 @@ async fn test_register_email_taken(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::
 }
 
 #[sqlx::test(migrations = "./migrations")]
-#[tracing_test::traced_test]
 async fn test_register_database_disconnected(
     pool: sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<()> {
@@ -232,7 +227,6 @@ async fn test_register_database_disconnected(
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 async fn test_register_same_password_different_hash(
     pool: sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<()> {
@@ -279,7 +273,6 @@ async fn test_register_same_password_different_hash(
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 async fn test_session_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     let TestAuthState::Register {
         session: DatabaseSession { id, .. },
@@ -306,7 +299,6 @@ async fn test_session_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 async fn test_session_invalid_ssid_cookie(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     let mut request = AuthEndpoint::Session.build(&pool);
     request.builder = request.builder.header(
@@ -336,7 +328,6 @@ async fn test_session_invalid_ssid_cookie(pool: sqlx::Pool<sqlx::Postgres>) -> a
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 async fn test_session_session_expired(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     // We need to check that the session is removed from the database and cookies.
 
@@ -395,7 +386,6 @@ async fn test_session_session_expired(pool: sqlx::Pool<sqlx::Postgres>) -> anyho
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 async fn test_session_missing_session_in_database(
     pool: sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<()> {
@@ -436,7 +426,6 @@ async fn test_session_missing_session_in_database(
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 async fn test_session_removed_when_user_removed(
     pool: sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<()> {
@@ -468,7 +457,6 @@ async fn test_session_removed_when_user_removed(
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 async fn test_login_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     let TestAuthState::Register {
         user: DatabaseUser { id: user_id, .. },
@@ -535,7 +523,6 @@ async fn test_login_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 async fn test_login_already_authenticated(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     let TestAuthState::Register {
         session: DatabaseSession { id, .. },
@@ -567,7 +554,6 @@ async fn test_login_already_authenticated(pool: sqlx::Pool<sqlx::Postgres>) -> a
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 async fn test_logout_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     let TestAuthState::Register {
         session: DatabaseSession { id, .. },
@@ -593,7 +579,6 @@ async fn test_logout_valid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<(
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 async fn test_logout_invalid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     let TestAuthState::Register { .. } = AuthEndpoint::Register.create(&pool).await?;
     let mut request = AuthEndpoint::Logout.build(&pool);
@@ -647,7 +632,6 @@ async fn test_logout_invalid(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result
 }
 
 #[sqlx::test]
-#[tracing_test::traced_test]
 fn test_register_hmac_signature(pool: sqlx::Pool<sqlx::Postgres>) -> anyhow::Result<()> {
     let TestAuthPayload::Register(payload) = AuthEndpoint::Register.payload() else {
         panic!("Expected Register payload variant");

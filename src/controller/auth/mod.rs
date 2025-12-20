@@ -1,5 +1,3 @@
-//! NOTE: The authentication controller module could probably be consider an abomination of this project.
-
 mod error;
 mod password_policy;
 
@@ -363,7 +361,9 @@ pub async fn login_user(
         .fetch_optional(tx.as_mut())
         .await?
     else {
-        return Err(self::Error::InvalidCredentials { source: None });
+        return Err(self::Error::InvalidCredentials {
+            source: Some(Arc::new(anyhow::anyhow!("No user exists for that email."))),
+        });
     };
 
     Argon2::default()
@@ -448,10 +448,13 @@ pub async fn logout_user(
 #[cfg(test)]
 mod tests {
     use anyhow::Context;
-    use axum::{body::Body, extract::Request, http};
+    use axum::{
+        body::Body,
+        extract::Request,
+        http::{self, header},
+    };
     use http::method::Method;
     use http_body_util::BodyExt;
-    use reqwest::header;
     use sqlx::types::uuid;
     use tower::ServiceExt;
 
@@ -469,7 +472,6 @@ mod tests {
     // NOTE: It is worth noting, that if some test fails, try running it with cargo test -- --test-threads 1, or add [serial_test::serial]
 
     #[test]
-    #[tracing_test::traced_test]
     fn test_password_hash() {
         let password = "Password1!";
         let hash = hash_password(password).expect("Failed to hash password");

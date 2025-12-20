@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::response::IntoResponse;
 
 use crate::{ErrorExt, error::ErrorResponse};
@@ -8,6 +10,7 @@ pub enum Error {
     #[error(transparent)]
     DatabaseError(#[from] crate::database::Error),
     GenericControllerError(#[from] crate::controller::GenericControllerError),
+    Other(#[from] Arc<anyhow::Error>),
 }
 
 impl IntoResponse for Error {
@@ -24,3 +27,24 @@ impl ErrorExt for self::Error {
         return crate::controller::Error::from(self).into();
     }
 }
+
+// impl From<MigrateError> for Error {
+//     fn from(err: MigrateError) -> Self {
+//         Self::MigrateError(Arc::new(err))
+//     }
+// }
+
+// impl From<sqlx::Error> for Error {
+//     fn from(err: sqlx::Error) -> Self {
+//         Self::ConnectionError(Arc::new(err))
+//     }
+// }
+
+// impl<T> From<T> for Error
+// where
+//     T: Sized,
+// {
+//     fn from(value: T) -> Self {
+//         Self::Other(Arc::new(value))
+//     }
+// }

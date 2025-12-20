@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useFetch } from "../../api/hooks/useFetch";
 import { Stock } from "../../api/types/schema";
 import StockEntry from "../components/StockEntry";
@@ -16,11 +17,11 @@ export default function Page() {
   }
 
   return (
-    <div className="w-full flex flex-col gap-4 p-8">
-      <h2 className="text-xl font-bold mb-4">Stocks</h2>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    <div className="flex w-full flex-col gap-4 p-8">
+      <h2 className="mb-4 text-xl font-bold">Stocks</h2>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
         {stocks.map((stock) => (
-          <StockEntry stock={stock} key={stock.id} />
+          <StockEntry stock={stock} key={stock.id} price={1} />
         ))}
       </div>
     </div>

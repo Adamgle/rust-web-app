@@ -43,6 +43,7 @@ pub enum Env {
     // TODO: Maybe we need to remove the public envs from consideration here, as those are only used in the frontend
     // because we are doing the same twice.
     NextPublicClientUrl,
+    NextPublicServerUrl,
     ClientPort,
     DbAdminPostgresPassword,
     DbPostgresAdambPassword,

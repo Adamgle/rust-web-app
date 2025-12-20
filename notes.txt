@@ -277,16 +277,15 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
                -> We would have to use the technic of "salt" to deviate the password hash a little bit from the original
                     that was provided, I imagine that the "salt" works like creating a random entropy level to the hash that 
                     basically adds the randomness and prevents the same hash of the same password, amplifying uniqueness of the hash.
-               -> JWTs tokens which I imagine works by take the load of the database, and the logging I guess is not an issues, but when you
+               -> JWTs tokens which I imagine works by taking the load of the database, and the logging I guess is not an issue, but when you
                     have endpoints and service behind the authentication, you have to validate that the user is authenticated on each request.
                     That would create a lot of load on the database, so JWTs in my understating are working like that.
                     The token is encrypted, thought it can be decrypted and the token itself is not secure, I know that you have to
                     set short expiration date for that token like 1-2 hours, I don't know how to secure it properly yet, 
                     currently we will not implement that.
                -> If hosted, the credentials should be transferred through TLS.
-     <TODO> 
-          -> Learn about the JWTs, check if that would allow me to authorize the user
-          only using the client side code.
+     <UPDATE> 
+          -> Learn about the JWTs, check if that would allow me to authorize the user only using the client side code.
           <UPDATE>
                We wil not implement JWTs out of the box, first we'll focus on session-based authentication, and if the time comes,
                we will do the JWTs to unload the server and database calls to authorize the user when protected routes are called.
@@ -301,26 +300,23 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
           To make it even remotely secure the service should be accessible via TLS secure layer.
 
 
-### ISSUES
-1. <FIXED> Logger does not work as I have changed something while implementing tokio-console in the logger module.
-2. <FIXED> I don't know how to capture the error in the request chain but just log then in the place where they have happened.
+### TODO:
+<DONE> Logger does not work as I have changed something while implementing tokio-console in the logger module.
+<DONE> I don't know how to capture the error in the request chain but just log them in the place where they have happened.
      Specifically when the error of missing sessions happens, first it is not logged to stdout and the associated
      error of the thiserror macro attribute is not invoked.
-3. <FIXED> ErrorResponse struct is not treated as an actual response, we need to find out how to make it recognize as a response.
-4. Main authentication login is finished but there are a lot to consider:
-     1. No CSRF protection for SSID cookies.
-     2. Taken emails are enumerated during registration logic, although that is kind off by design, thought maybe I should change the design.
-     3. No timing attacks protection that could disclose information like email existence, although it is transparent here, should be protected. 
-     4. Cookies needs to be signed, as currently client can enumerate all uuid, although that is infeasible to brute-force, but would prevent
-          querying the database as it would be early detected as forged and malformed by the client.
-          We would hold some single secret server-side, verify if the cookie is valid given that key and then precede with the request or abort early.
-          <SIGNATURE>.<SSID>
-     5. Errors that occur, client and server-side are not stored anywhere, I would like to able to hold the client errors in some kind of Postgres table
-          as a JSON type thought I need to explore that, surely it would be unstructured logs, or semi-structure.
-5. Payloads are not restricted to size
-6. 
-
-### TODO:
+<DONE> ErrorResponse struct is not treated as an actual response, we need to find out how to make it recognize as a response.
+     Main authentication login is finished but there are a lot to consider:
+          1. No CSRF protection for SSID cookies.
+          2. Taken emails are enumerated during registration logic, although that is kind off by design, thought maybe I should change the design.
+          3. No timing attacks protection that could disclose information like email existence, although it is transparent here, should be protected. 
+          4. Cookies needs to be signed, as currently client can enumerate all uuid, although that is infeasible to brute-force, but would prevent
+               querying the database as it would be early detected as forged and malformed by the client.
+               We would hold some single secret server-side, verify if the cookie is valid given that key and then precede with the request or abort early.
+               <SIGNATURE>.<SSID>
+          5. Errors that occur, client and server-side are not stored anywhere, I would like to able to hold the client errors in some kind of Postgres table
+               as a JSON type thought I need to explore that, surely it would be unstructured logs, or semi-structure.
+<TODO> Payloads are not restricted to size
 <ABORTED> Get data for the stock market, that would be Stock market history,
      the broader time frame, the better.
      <ABORTED> 
@@ -328,9 +324,33 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
           get involved in the actual data processing of the real world, if any.
 <DONE> Writing tests for controller::auth
 <DONE> Sign the SSID cookie with HMAC.
-     <UPDATE>
+     <NOTE>
           I think we should just use the SignedJar from `cookies` re-exported by `tower-cookies` crate.
-<TODO> Learn how the edge runtime in Next.js works and figure out should I host the frontend to Vercel if I would use it,
+<UPDATE> Learn how the edge runtime in Next.js works and figure out should I host the frontend to Vercel if I would use it,
      and I am using it in proxy.ts for early redirection.
-<TODO> I am sometimes displaying errors in middleware that are sometimes wrapped in anyhow so they get displayed
+     <UPDATE>
+          Let's be realistic - it would never get hosted.
+<UPDATE> I am sometimes displaying errors in middleware as the enum variants with value that are wrapped in anyhow so they get displayed
      like their string representation, check if I can downcast them somehow to actual types for better debugging.
+     <UPDATE>
+          I do not think it's feasible, it would have to carry some information about the inner type, maybe `typetag` crate could help with that
+          but it is not worth the work, the whole design of holding type-erased types in enum variant mostly eliminates the benefit of using them
+          and I would try to avoid that pattern, especially for handling multiple cases of error happening and the `source` error being and `Option`
+          because logically it could just be a catch-all variant as `anyhow` with context attached.
+
+          The issue is related to the auth controller module.
+
+### <TODAY GOALS>
+<RECAP>
+     We already have the auth done, there are some issues, but most probably we would not fix those as the business logic is fine,
+     there might be some security concerns, though they are minor and not even worthwhile.
+
+     We have the users, we have the accounts, finally we can connect the user to the personal wallets and stocks that they own.
+     To do that we need the stocks data, that would mostly likely require redesigning the database schemas as currently it's kind of 
+     shenanigans down there.
+<GOALS>
+     1. Implement the price of the stocks changing, we will do that with random number meanwhile we do not have the stocks data/
+          that would be streamed every so some interval to the user using server-sent events.
+
+     Client sent SSE usage: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
+     Server sent axum reference: https://docs.rs/axum/latest/axum/response/sse/index.html
