@@ -10,7 +10,8 @@ export function StockEntry({ stock, price }: { stock: Stock; price: number }) {
     >
       <h3 className="text-lg font-semibold">{stock.abbreviation}</h3>
       <p className="text-sm">Price: ${price || stock.price}</p>
-      <p className={`text-sm font-bold ${stock.delta}`}>{stock.company}</p>
+      <p className="text-sm">Delta {stock.delta}</p>
+      <p className={`text-sm font-bold`}>{stock.company}</p>
     </Link>
   );
 }

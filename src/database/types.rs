@@ -1,4 +1,3 @@
-// TODO: Delegate the database schemas to separate module/file.
 #[derive(Debug)]
 pub struct DatabaseSession {
     pub id: sqlx::types::uuid::Uuid,
@@ -10,7 +9,6 @@ pub struct DatabaseSession {
 #[derive(Debug)]
 
 pub struct DatabaseUser {
-    // TODO: Map the full user schema here.
     pub id: i32,
     pub created_at: chrono::NaiveDate,
     pub account_id: i32,
@@ -18,7 +16,6 @@ pub struct DatabaseUser {
     pub delta: f32,
     pub email: String,
     pub password_hash: String,
-    // pub password_salt: String,
 }
 
 pub struct DatabaseAccount {
@@ -33,7 +30,6 @@ pub struct DatabaseAccount {
 //     // Primary key is (user_id, session_id), not sure if we need to represent that here.
 // }
 
-// NOTE: Maybe that should be isolated into separate module as well.
 // NOTE: I would be nice if there would be From conversion mapping database types -> client types,
 // as doing it the opposite way does not apply, but not sure if we need
 // ### Client-facing types
@@ -63,7 +59,6 @@ impl From<DatabaseUser> for ClientUser {
 // https://docs.rs/sqlx/latest/sqlx/postgres/types/index.html#types
 #[derive(serde::Serialize)]
 
-// TODO: Delegate the database schemas to separate module/file.
 pub struct Stock {
     pub id: i32, // That should be unsigned, but it fails converting to u32, as postgres does not have unsigned, like a [1, 2^31 - 1]
     pub abbreviation: String,

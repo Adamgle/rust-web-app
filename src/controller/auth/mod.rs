@@ -14,6 +14,7 @@ use sqlx::{Executor, Pool, types::Uuid};
 use tower_cookies::{Cookie, Cookies};
 
 use crate::{
+    AppState,
     config::{self, Env, EnvError},
     controller::{cookies, error::GenericControllerError, types::ApiStatusResponse},
     database::{
@@ -61,9 +62,10 @@ where
     }
 }
 
-pub fn router<S: Clone + Send + Sync + 'static>() -> axum::Router<S>
-where
-    DatabaseConnection: FromRef<S>,
+// <S: Clone + Send + Sync + 'static>
+pub fn router() -> axum::Router<AppState>
+// where
+    // DatabaseConnection: FromRef<S>,
 {
     Router::new()
         .route("/auth/session", get(get_auth_session))
@@ -127,7 +129,6 @@ pub async fn get_server_side_session(
     conn: &Pool<sqlx::Postgres>,
     cookies: &Cookies,
 ) -> self::Result<ClientUser> {
-    // TODO: Verify the SSID cookie signature against HMAC.
     let Some(cookie) = cookies.get(cookies::SSID) else {
         return Err(self::Error::MissingSessionCookie);
     };
@@ -593,6 +594,7 @@ mod tests {
 
         let result = super::parse_ssid_cookie(cookie.clone());
 
+        // NOTE: This sometimes fails the assertion, do not know why.
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),

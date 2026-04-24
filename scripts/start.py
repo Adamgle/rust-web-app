@@ -3,6 +3,7 @@
 import shutil
 import subprocess
 import sys
+from typing import Dict, Optional
 from dotenv import dotenv_values
 import pathlib
 
@@ -24,17 +25,48 @@ def start():
     envs = dotenv_values(DOTENV_PATH, verbose=True)
     frontend_envs = dotenv_values(FRONTEND_ENV_PATH, verbose=True)
 
+    # !!! NOTE: That code can only be used in development, envs should not be shared from server to client.
+
     # Detect merge conflicts
+    client_public_envs: Dict[str, str | None] = dict()
+
     try:
         # Order insensitive comparison, dicts are different, conflicts detected.
+
+        all_keys = set(envs.keys()) | set(frontend_envs.keys())
+
+        exception: Optional[Exception] = None
+        for key in all_keys:
+            if key.startswith("NEXT_PUBLIC_"):
+                if (
+                    key in envs
+                    and key in frontend_envs
+                    and envs[key] != frontend_envs[key]
+                ):
+                    exception = Exception(
+                        f"Public env variables exists in server and client .env file, review the conflict."
+                    )
+
+                    # This case takes precedences of the .env from the server to the client, user can review the changed before merging
+                    client_public_envs[key] = envs[key]
+                elif key in envs:
+                    client_public_envs[key] = envs[key]
+                elif key in frontend_envs:
+                    client_public_envs[key] = frontend_envs[key]
+            else:
+                if exception is not None:
+                    raise exception
+
         if dict(envs) != dict(frontend_envs):
             # Check if the envs in the client are the same as the one in the server
 
-            all_keys = set(envs.keys()) | set(frontend_envs.keys())
             diffs = {}
 
             for key in all_keys:
-                if envs.get(key) != frontend_envs.get(key):
+                # Do not consider the NEXT_PUBLIC_ as they are already handled.
+                if not key.startswith("NEXT_PUBLIC_") and envs.get(
+                    key
+                ) != frontend_envs.get(key):
                     diffs[key] = (envs.get(key), frontend_envs.get(key))
 
             if diffs:
@@ -44,13 +76,40 @@ def start():
                 )
     except Exception as e:
         print(f"[WARN]: {e}")
-        choice = input("Proceed with merge y/N: ").lower().strip()
+        choice = (
+            input("Proceed with merge from server to client? y/N: ").lower().strip()
+        )
         if choice != "y":
             print("Merge aborted.")
             sys.exit(1)
 
     # NOTE: Since we are using bacon to run the server, the .env would not copy itself
     # on the recompilation, we would need to run the script again.
+
+    # Try to remove client side variables from the server .env file.
+
+    print(client_public_envs)
+
+    if client_public_envs:
+        with open(DOTENV_PATH, "r+", encoding="utf-8") as f:
+            # Remove the public envs from the server .env, if any
+            new_content = [
+                (
+                    ""
+                    if any(
+                        public_env
+                        for public_env in client_public_envs
+                        if line.startswith(public_env)
+                    )
+                    else line
+                )
+                for line in f.readlines()
+            ]
+
+            f.truncate(0)
+            f.seek(0)
+            new_content = "".join(new_content).strip()
+            f.write(new_content)
 
     # The .env of the server is the source of truth, copy it to the client.
     shutil.copyfile(DOTENV_PATH, FRONTEND_ENV_PATH)
@@ -59,6 +118,20 @@ def start():
         original_content = f.read()
         f.seek(0)
         f.write(f"# [INFO]: Copied {DOTENV_PATH} to {FRONTEND_ENV_PATH}\r\n")
+
+        # Write client side envs
+        f.write("# [INFO]: Client side public variables\r\n")
+
+        buffer = [
+            f"{key}={value}"
+            for key, value in client_public_envs.items()
+            # if key not in frontend_envs
+        ]
+        buffer = "\n".join(buffer)
+
+        if buffer and buffer.strip():
+            f.write(buffer + "\r\n")
+
         f.write(original_content)
 
     # Run server
@@ -93,15 +166,6 @@ def start():
             f"Start-Process powershell -WorkingDirectory {FRONTEND_PATH} -ArgumentList '-NoExit','-Command','npm run dev'",
         ]
     )
-
-    # subprocess.Popen(
-    #     [
-    #         "powershell",
-    #         "-NoExit",
-    #         "-Command",
-    #         f"Start-Process powershell -WorkingDirectory '{FRONTEND_PATH}' -ArgumentList @('-NoExit','-Command','npm run dev -- -p {CLIENT_PORT}')",
-    #     ]
-    # )
 
 
 if __name__ == "__main__":

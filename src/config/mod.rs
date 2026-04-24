@@ -1,3 +1,5 @@
+//! # This code should not happen. Written to practice unit testing.
+
 mod error;
 pub use self::error::{EnvError, Error};
 
@@ -8,8 +10,6 @@ pub(in crate::config) type Result<T> = std::result::Result<T, self::Error>;
 
 pub struct Config;
 
-/// # This code should not happen. Written to practice unit testing.
-///
 /// Defines all the environment variables used in the application.
 /// Throw runtime errors if there is any mismatch between the envs defined in the `.env` file
 ///
@@ -40,10 +40,6 @@ pub enum Env {
     ServerUrl,
     ServerPort,
     ClientUrl,
-    // TODO: Maybe we need to remove the public envs from consideration here, as those are only used in the frontend
-    // because we are doing the same twice.
-    NextPublicClientUrl,
-    NextPublicServerUrl,
     ClientPort,
     DbAdminPostgresPassword,
     DbPostgresAdambPassword,
@@ -106,6 +102,11 @@ impl Env {
 
         for env in file_envs {
             let (key, ..) = env.map_err(EnvError::from)?;
+
+            // Omit client-side only variables.
+            if key.starts_with("NEXT_PUBLIC_") {
+                continue;
+            }
 
             // Since the key is in wrong format, surely there is not variant for it in the enum.
             // and we want to inform about that before we inform about the missing variant in the enum.

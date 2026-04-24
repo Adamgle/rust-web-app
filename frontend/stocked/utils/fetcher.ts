@@ -32,7 +32,7 @@ export async function fetcher<Data>(
   const data = await res.json();
 
   if (!res.ok) {
-    // Tha should be of type ApiFetchError
+    // That should be of type ApiFetchError
     throw data as ApiFetchError;
   }
 

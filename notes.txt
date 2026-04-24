@@ -341,16 +341,25 @@ Main idea is to trade with other, and simulate the trading game, the next steps 
           The issue is related to the auth controller module.
 
 ### <TODAY GOALS>
-<RECAP>
-     We already have the auth done, there are some issues, but most probably we would not fix those as the business logic is fine,
-     there might be some security concerns, though they are minor and not even worthwhile.
+<20.12.2025>
+     <RECAP>
+          We already have the auth done, there are some issues, but most probably we would not fix those as the business logic is fine,
+          there might be some security concerns, though they are minor and not even worthwhile.
 
-     We have the users, we have the accounts, finally we can connect the user to the personal wallets and stocks that they own.
-     To do that we need the stocks data, that would mostly likely require redesigning the database schemas as currently it's kind of 
-     shenanigans down there.
-<GOALS>
-     1. Implement the price of the stocks changing, we will do that with random number meanwhile we do not have the stocks data/
-          that would be streamed every so some interval to the user using server-sent events.
+          We have the users, we have the accounts, finally we can connect the user to the personal wallets and stocks that they own.
+          To do that we need the stocks data, that would mostly likely require redesigning the database schemas as currently it's kind of 
+          shenanigans down there.
+     <GOALS>
+          1. <DONE> Implement the price of the stocks changing, we will do that with random number meanwhile we do not have the stocks data/
+               that would be streamed every so some interval to the user using server-sent events.
 
-     Client sent SSE usage: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
-     Server sent axum reference: https://docs.rs/axum/latest/axum/response/sse/index.html
+          Client sent SSE usage: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
+          Server sent axum reference: https://docs.rs/axum/latest/axum/response/sse/index.html
+<21.12.2025>
+     <RECAP>
+          
+     <GOALS>
+          
+
+<REVIEW>
+1. <DONE> Check what is this 'logs' directory and how does it work as I forgot of its existence, surely that was just for debugging.

@@ -37,6 +37,7 @@ impl From<anyhow::Error> for Error {
     }
 }
 
+/// Generic error message sent to the client, cannot contain sensitive fields.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ErrorResponse<'a> {
     // TODO: Define the appropriate fields for the error response
@@ -48,8 +49,8 @@ pub struct ErrorResponse<'a> {
     pub status: axum::http::StatusCode,
 }
 
+/// Defaults to 500 Internal Server Error with generic message.
 impl Default for ErrorResponse<'_> {
-    /// Defaults to 500 Internal Server Error with generic message.
     fn default() -> Self {
         Self {
             message: Cow::Borrowed("Internal Server Error"),
@@ -104,7 +105,7 @@ where
     /// Convert the variant error into the crate-level error to allow inserting it into the `Extension` of the response.
     ///
     /// The middleware tracks the errors by it's TypeId, if we would return error of not crate-level Error it is of different TypeId,
-    /// We need to manually convert it because automatic, recursive conversion via From trait is not possible, it doing one level of conversions.
+    /// We need to manually convert it because automatic, recursive conversion via From trait is not possible, it is doing one level of conversions.
     fn to(self) -> crate::Error;
 
     /// Convert the variant error into the crate-level error if applicable,

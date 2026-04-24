@@ -3,7 +3,7 @@ use std::sync::Arc;
 use sqlx::migrate::MigrateError;
 
 #[derive(thiserror::Error, Debug, Clone)]
-// NOTE: Each error default to Internal Server Error on the display impl as we want to avoid leaking sensitive information.
+// NOTE: Each error defaults to Internal Server Error on the display impl as we want to avoid leaking sensitive information.
 #[error("Internal Server Error")]
 pub enum Error {
     // NOTE: I think the sqlx::Error may leak to client.

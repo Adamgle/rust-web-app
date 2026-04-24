@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useFetch } from "../../api/hooks/useFetch";
 import { Stock } from "../../api/types/schema";
 import StockEntry from "./StockEntry";
-import { assert } from "node:console";
 
 export function Stocks() {
   const { data: stocks, error, isLoading } = useFetch<Stock[]>("/stocks");
@@ -15,7 +14,7 @@ export function Stocks() {
       return;
     }
 
-    const source = new EventSource(endpoint);
+    const source = new EventSource(endpoint, { withCredentials: false });
 
     source.onmessage = (event) => {
       if (event.data) {

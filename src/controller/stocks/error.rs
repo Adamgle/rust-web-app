@@ -17,8 +17,16 @@ impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
         // TODO: Do the error handling when the application matures.
 
-        // let message = self.to_string();
-        self.to_response(ErrorResponse::default())
+        let message = self.to_string();
+        
+        let status = match self {
+            _ => ErrorResponse::default().status,
+        };
+
+        self.to_response(ErrorResponse {
+            message: message.into(),
+            status,
+        })
     }
 }
 
