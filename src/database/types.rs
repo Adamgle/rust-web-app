@@ -13,7 +13,8 @@ pub struct DatabaseUser {
     pub created_at: chrono::NaiveDate,
     pub account_id: i32,
     pub balance: f32,
-    pub delta: f32,
+    pub change_percent: f32,
+    pub change: f32,
     pub email: String,
     pub password_hash: String,
 }
@@ -39,7 +40,7 @@ pub struct DatabaseAccount {
 pub struct ClientUser {
     pub id: i32,
     pub balance: f32,
-    pub delta: f32,
+    pub change: f32,
     pub email: String,
     pub created_at: chrono::NaiveDate,
 }
@@ -49,7 +50,7 @@ impl From<DatabaseUser> for ClientUser {
         Self {
             id: user.id,
             balance: user.balance,
-            delta: user.delta,
+            change: user.change,
             email: user.email,
             created_at: user.created_at,
         }
@@ -65,7 +66,9 @@ pub struct Stock {
     pub company: String,
     pub since: chrono::NaiveDate, // DATE
     pub price: f32,
-    pub delta: f32,
+    pub change_percent: f32,
+    pub change: f32,
+    // pub delta: f32,
     pub last_update: chrono::NaiveDate, // TIMESTAMP
     pub created_at: chrono::NaiveDate,  // TIMESTAMP
 }

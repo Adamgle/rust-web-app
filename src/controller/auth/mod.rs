@@ -161,7 +161,7 @@ pub async fn get_server_side_session(
     // This does not make sens because the session would no exist without the user,
     let Some(user) = sqlx::query_as!(
         ClientUser,
-        "SELECT id, balance, delta, created_at, email FROM users WHERE users.id = $1",
+        "SELECT id, balance, change, created_at, email FROM users WHERE users.id = $1",
         user_id
     )
     .fetch_optional(conn)

@@ -1,6 +1,6 @@
 #![allow(clippy::needless_return)]
 
-use std::{collections::HashMap, io::Write, process::Stdio, sync::Arc};
+use std::{io::Write, process::Stdio, sync::Arc};
 
 pub use prelude::*;
 
@@ -17,6 +17,7 @@ use axum::{
     http::Request,
     middleware::{Next, from_fn},
 };
+use sqlx::{Pool, Postgres};
 use tokio::{io::AsyncBufReadExt, sync::broadcast};
 
 use crate::{config::Config, database::DatabaseConnection};
@@ -28,12 +29,32 @@ pub struct AppState {
     // caches: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, String>>>,
 }
 
+#[derive(serde::Deserialize)]
+struct StreamedTicker {
+    // market_hours: "",
+    // exchange: String,
+    // TIMESTAMP
+    // time: usize,
+    // NOTE: Not sure what Timestamp is streams.
+    time: chrono::NaiveDateTime,
+    change_percent: Option<f32>,
+    change: Option<f32>,
+    // quote_type: ""
+    price: f32,
+    // price_hint: "",
+    id: String,
+}
+
+// type SerializedStreamedTicker = String;
+
 // NOTE: Stocks tickers streaming MUST NOT be an endpoint, it should be a processes that runs for the server, uniform
 // for all users. The reason is that it would bloat the API and start the websocket connection for each user.
 //  -> self::Result<impl Stream>
-fn stream_tickers(tx: broadcast::Sender<String>) {
-    // TODO: The value for the key as a ticker has to hold the JSON object.
-    // let mut buffer: HashMap<String, HashMap<String,  = HashMap::new();
+fn stream_tickers(tx: broadcast::Sender<String>, DatabaseConnection(conn): &DatabaseConnection) {
+    // let mut tickers_buffer: DashMap<String, StreamedTicker> = HashMap::new();
+    // let tickers_buffer: Arc<DashMap<String, Vec<StreamedTicker>>> = Arc::default();
+    // let tickers_buffer_c = Arc::clone(&tickers_buffer);
+    let (db_tx, mut db_rx) = tokio::sync::mpsc::channel::<StreamedTicker>(10_000);
 
     tokio::spawn(async move {
         tracing::info!("Streaming stocks tickers...");
@@ -71,12 +92,102 @@ fn stream_tickers(tx: broadcast::Sender<String>) {
             while let Ok(Some(line)) = lines.next_line().await {
                 tracing::warn!("{:?} stderr: {}", &path, line);
             }
+
+            // Channel for buffering the tickers and used in separate task to flush to database.
         });
 
+        // We will deserialize the tickers in single operation, maybe we will use `rayon` to do that efficiently
+        // as that will be the operation done in bulk, all we care is performance there.
+        // UPDATE: It is better to do the tokio::task::spawn_blocking
         while let Ok(Some(ticker)) = lines.next_line().await {
-            let _ = tx.send(ticker);
+            let t = serde_json::from_str::<StreamedTicker>(&ticker)
+                .unwrap_or_else(|e| panic!("Could not deserialize the ticker: {ticker}\n{e}"));
+
+            match tx.send(ticker) {
+                Ok(receivers) => {
+                    tracing::info!("Current subscribed receivers: {receivers}");
+
+                    // tickers_buffer
+                    //     .entry(t.id.clone())
+                    //     .and_modify(|e| e.push(t))
+                    //     .or_default();
+                }
+                Err(e) => {
+                    tracing::warn!("Ticker was not sent through the broadcast channel: {e:?}");
+                }
+            }
+
+            if let Err(e) = db_tx.send(t).await {
+                tracing::warn!("Ticker was not sent through the database mpsc channel: {e:?}");
+            }
         }
     });
+
+    // Process the buffered tickers and flush them to database.
+
+    let c = conn.clone();
+    let mut buffer = Vec::new();
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+
+    tokio::task::spawn(async move {
+        loop {
+            tokio::select! {
+                Some(ticker) = db_rx.recv() => {
+                    buffer.push(ticker);
+                    if buffer.len() >= 500 {
+                        flush_streamed_tickers(&c, &mut buffer).await;
+                        buffer.clear()
+
+                    }
+                }
+                _ = interval.tick() => {
+                    if !buffer.is_empty() {
+                        flush_streamed_tickers(&c, &mut buffer).await;
+                        buffer.clear()
+                    }
+                }
+            }
+        }
+    });
+
+    // tokio::time::timeout(tokio::time::Duration::from_secs(10), worker);
+}
+
+async fn flush_streamed_tickers(conn: &Pool<Postgres>, buffer: &mut Vec<StreamedTicker>) {
+    tracing::info!("Flushing the buffered streamed buffer to database");
+
+    let mut tx: sqlx::Transaction<'_, sqlx::Postgres> = conn
+        .begin()
+        .await
+        .expect("Failed to start a database transaction.");
+
+    for ticker in buffer {
+        let stock = sqlx::query!(
+                    "UPDATE stocks SET abbreviation = $1, price = $2, change_percent = $3, change = $4, last_update = $5 WHERE abbreviation = $6 RETURNING stocks.id",
+                    // NOTE: Abbreviation should not be modified with each tick, but will be useful for now to fill the data to database
+                    // as it is not there yet.
+                    ticker.id,
+                    ticker.price,
+                    ticker.change_percent,
+                    ticker.change,
+                    ticker.time,
+                    ticker.id
+                ).fetch_one(tx.as_mut()).await.expect("Updating `stocks` table failed");
+
+        sqlx::query!(
+            "UPDATE stocks_history SET price = $1, time = $2 WHERE stock_id = $3",
+            ticker.price,
+            ticker.time,
+            stock.id
+        )
+        .fetch_one(tx.as_mut())
+        .await
+        .expect("Updating `stocks_history` table failed");
+    }
+
+    tx.commit()
+        .await
+        .expect("Failed to commit a database transaction.");
 }
 
 impl AppState {
@@ -110,9 +221,8 @@ pub async fn run(_config: config::Config) -> crate::Result<()> {
 
     // None, because it defaults to creating database already in the app function, it is easier this way to test using `app`.
     let state = AppState::default().await?;
-
     // TODO: That is critical service, though failure of that service should not terminate the whole server, but it does in current design.
-    stream_tickers(state.tx_tickers.clone());
+    stream_tickers(state.tx_tickers.clone(), &state.database);
 
     let app = app(state).await?;
 

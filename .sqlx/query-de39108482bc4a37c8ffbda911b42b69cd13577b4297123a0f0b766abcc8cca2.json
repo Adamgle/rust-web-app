@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE stocks SET abbreviation = $1, price = $2, change_percent = $3, change = $4, last_update = $5 WHERE abbreviation = $6 RETURNING stocks.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Float4",
+        "Float4",
+        "Float4",
+        "Timestamp",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "de39108482bc4a37c8ffbda911b42b69cd13577b4297123a0f0b766abcc8cca2"
+}

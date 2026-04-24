@@ -36,7 +36,7 @@ async fn list_stocks(DatabaseConnection(conn): DatabaseConnection) -> self::Resu
     //     .await?;
 
     // "SELECT * FROM users WHERE hash = " + (&str &hash) => ""
-
+    
     // That maps the query result to the struct Stock.
     Ok(sqlx::query_as!(Stock, "SELECT * FROM stocks")
         .fetch_all(&conn)

@@ -30,16 +30,21 @@
       },
       {
         "ordinal": 5,
-        "name": "delta",
+        "name": "change_percent",
         "type_info": "Float4"
       },
       {
         "ordinal": 6,
+        "name": "change",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 7,
         "name": "last_update",
         "type_info": "Timestamp"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamp"
       }
@@ -48,6 +53,7 @@
       "Left": []
     },
     "nullable": [
+      false,
       false,
       false,
       false,

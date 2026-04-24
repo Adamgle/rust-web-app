@@ -104,21 +104,33 @@
 #     ws.listen(message_handler)
 
 import asyncio
+from contextlib import redirect_stdout
+import datetime
 import json
+import os
+import sys
 import yfinance as yf
+import logging
+from consts import TICKERS
 
-union = None
-
-
-# {'market_hours', 'price', 'exchange', 'change', 'time', 'quote_type', 'price_hint', 'id', 'change_percent'}
-# {'market_hours', 'price', 'exchange', 'change', 'time', 'quote_type', 'price_hint', 'id', 'change_percent'}
-# Mutual fields: {'market_hours', 'price', 'exchange', 'price_hint', 'quote_type', 'time', 'id'}
-# {'market_hours', 'exchange', 'time', 'quote_type', 'price', 'price_hint', 'id'}
+# Usually seen fields in stocks schema
+stock_keys = {
+    # "market_hours",
+    # "exchange",
+    "time",
+    # "quote_type",
+    "price",
+    # "price_hint",
+    "id",
+    # Those 2 where not usually seen, they should be treated as option from the stream ticker, but can be derived from the previous values
+    "change_percent",
+    "change",
+}
 
 
 # define your message callback
 def message_handler(message):
-    global union
+    global stock_keys
 
     # Tickers comes as a dict and we only care about that, we are not processing anything else.
     if isinstance(message, dict):
@@ -129,29 +141,41 @@ def message_handler(message):
         # else:
         #     union &= keys
 
-        ticker = json.dumps(message)
+        ticker = {k: message[k] for k in stock_keys if k in message}
+
+        if "time" in ticker:
+            dt = datetime.datetime.fromtimestamp(int(ticker["time"]) / 1000)
+            ticker["time"] = dt.isoformat()  # Standard ISO format: 2026-04-24T21:32:34
+
+        # Test, to seen what tickers do not have all of those usually seen fields and which are lacking
+
+        diff = stock_keys - message.keys()
+
+        if diff:
+            with open("./logs/missing_fields.txt", mode="a", encoding="UTF-8") as f:
+                f.write(
+                    f"[{datetime.datetime.now()}] Ticker {message["id"]} are missing fields: {str(sorted(diff))} | ticker = {message.keys()}\r\n"
+                )
+
+        try:
+            ticker = json.dumps(ticker)
+        except Exception as e:
+            # TODO: Maybe that should write to some log file that some stock tickers are not sent to the server
+            # as they are no serializable, although that should not happen.
+            print(f"Could not serialize to JSON: {e}", file=sys.stderr)
+
         print(ticker, flush=True)
 
 
 async def main():
-    tickers = [
-        "AAPL",
-        # "MSFT",
-        # "NVDA",
-        # "TSLA",
-        # "AMZN",
-        # "GOOGL",
-        # "META",
-        # "SPY",
-        # "QQQ",
-        # "BTC-USD",
-    ]
+    # Usually, crypto currencies have different schema than stocks
+    # "BTC-USD",
 
     # =======================
     # With Context Manager
     # =======================
-    async with yf.AsyncWebSocket() as ws:
-        await ws.subscribe(tickers)
+    async with yf.AsyncWebSocket(verbose=False) as ws:
+        await ws.subscribe(TICKERS)
         await ws.listen(message_handler=message_handler)
 
     # =======================
@@ -161,6 +185,15 @@ async def main():
     # ws = yf.AsyncWebSocket()
     # await ws.subscribe(["AAPL", "BTC-USD"])
     # await ws.listen()
+
+
+# from contextlib import redirect_stdout
+# import io
+
+# f = io.StringIO()
+# with redirect_stdout(f):
+#     help(pow)
+# s = f.getvalue()
 
 
 asyncio.run(main())

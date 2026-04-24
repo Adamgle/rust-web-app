@@ -25,16 +25,21 @@
       },
       {
         "ordinal": 4,
-        "name": "delta",
+        "name": "change_percent",
         "type_info": "Float4"
       },
       {
         "ordinal": 5,
+        "name": "change",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 6,
         "name": "email",
         "type_info": "Text"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "password_hash",
         "type_info": "Text"
       }
@@ -47,6 +52,7 @@
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
